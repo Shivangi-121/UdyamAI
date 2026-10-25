@@ -1,0 +1,241 @@
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Literal
+
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+
+DateValue = date
+
+
+class ORMModel(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class MerchantUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    category: str | None = Field(default=None, max_length=100)
+
+
+class MerchantOut(ORMModel):
+    id: str
+    name: str
+    category: str
+    is_demo: bool
+    created_at: datetime
+
+
+class ProductCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    category: str | None = Field(default=None, max_length=100)
+    quantity: int | None = Field(default=None, ge=0)
+    cost: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    price: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+
+
+class ProductUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    category: str | None = Field(default=None, max_length=100)
+    quantity: int | None = Field(default=None, ge=0)
+    cost: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    price: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+
+
+class ProductOut(ProductCreate, ORMModel):
+    id: str
+    merchant_id: str
+    created_at: datetime
+
+
+class SaleCreate(BaseModel):
+    product_id: str | None = None
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    date: date
+    quantity: int = Field(default=1, gt=0)
+    unit_price: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    note: str = Field(default="", max_length=500)
+
+
+class SaleUpdate(BaseModel):
+    product_id: str | None = None
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    date: DateValue | None = None
+    quantity: int | None = Field(default=None, gt=0)
+    unit_price: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class SaleOut(ORMModel):
+    id: str
+    merchant_id: str
+    product_id: str | None
+    amount: Decimal
+    date: date
+    quantity: int
+    unit_price: Decimal | None
+    cost_of_goods: Decimal | None
+    note: str
+    source: str
+    created_at: datetime
+
+
+class ExpenseCreate(BaseModel):
+    amount: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
+    date: date
+    category: str = Field(default="Other", min_length=1, max_length=100)
+    note: str = Field(default="", max_length=500)
+
+
+class ExpenseUpdate(BaseModel):
+    amount: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=2)
+    date: DateValue | None = None
+    category: str | None = Field(default=None, min_length=1, max_length=100)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class ExpenseOut(ORMModel):
+    id: str
+    merchant_id: str
+    amount: Decimal
+    date: date
+    category: str
+    note: str
+    source: str
+    created_at: datetime
+
+
+class InventoryUpdate(BaseModel):
+    quantity: int = Field(ge=0)
+    note: str = Field(default="", max_length=250)
+
+
+class ScenarioInput(BaseModel):
+    available_inventory: int = Field(ge=0)
+    extra_stock: int = Field(ge=0)
+    demand_per_day: int = Field(ge=0)
+    period: int = Field(ge=1, le=90)
+    price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    cost: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
+    discount: Decimal = Field(default=0, ge=0, le=100, max_digits=5, decimal_places=2)
+    supplier_lead_time_days: int | None = Field(default=None, ge=0, le=365)
+
+
+class Projection(BaseModel):
+    inventory: int
+    demand: int
+    units_sold: int
+    revenue: Decimal
+    cost_of_goods_sold: Decimal
+    gross_profit: Decimal
+    unsold_units: int
+
+
+class ScenarioResult(BaseModel):
+    baseline: Projection
+    proposed: Projection
+    differences: dict[str, Decimal | int]
+    assumptions: list[str]
+    limitations: list[str]
+
+
+class ScenarioOut(ORMModel):
+    id: str
+    merchant_id: str
+    parameters: str
+    result: str
+    created_at: datetime
+
+
+class AssistantRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=2000)
+    language: Literal["en", "hi"] = "en"
+
+
+class Recommendation(BaseModel):
+    title: str
+    message: str
+    evidence: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    next_action: str
+    source: Literal["llm", "demo"] = "demo"
+    observed_data: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+
+
+class CampaignCreate(BaseModel):
+    product_id: str | None = None
+    objective: str = Field(min_length=2, max_length=250)
+    offer: str = Field(default="", max_length=250)
+    copy_text: str = Field(default="", max_length=4000, validation_alias=AliasChoices("copy_text", "copy"), serialization_alias="copy")
+    status: Literal["draft"] = "draft"
+
+
+class CampaignUpdate(BaseModel):
+    product_id: str | None = None
+    objective: str | None = Field(default=None, min_length=2, max_length=250)
+    offer: str | None = Field(default=None, max_length=250)
+    copy_text: str | None = Field(default=None, max_length=4000, validation_alias=AliasChoices("copy_text", "copy"), serialization_alias="copy")
+
+
+class CampaignOut(ORMModel):
+    id: str
+    merchant_id: str
+    product_id: str | None
+    objective: str
+    offer: str
+    copy_text: str = Field(validation_alias="copy_text", serialization_alias="copy")
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class CampaignGenerate(BaseModel):
+    product_id: str | None = None
+    objective: str = Field(min_length=2, max_length=250)
+    offer: str = Field(default="", max_length=250)
+    language: Literal["en", "hi"] = "en"
+    tone: str = Field(default="friendly", max_length=60)
+
+
+class CampaignGenerated(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    copy_text: str = Field(validation_alias=AliasChoices("copy_text", "copy"), serialization_alias="copy")
+    source: Literal["llm", "demo"]
+
+
+class TaskCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=180)
+    goal: str = Field(default="", max_length=500)
+
+
+class TaskStatus(BaseModel):
+    status: Literal["proposed", "approved", "rejected", "in_progress", "completed"]
+
+
+class TaskOut(ORMModel):
+    id: str
+    merchant_id: str
+    title: str
+    goal: str
+    status: str
+    requires_approval: bool
+    created_at: datetime
+
+
+class HealthOut(BaseModel):
+    status: str
+    ai_mode: Literal["live", "demo"]
+
+
+class APIError(BaseModel):
+    error: str
+    message: str
+
+
+class SummaryOut(BaseModel):
+    revenue: Decimal
+    recorded_expenses: Decimal
+    gross_profit: Decimal | None
+    gross_profit_available: bool
+    sales_count: int
+    expenses_count: int
+    missing_information: list[str]

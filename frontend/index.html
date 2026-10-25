@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8f5">
+  <meta name="description" content="A friendly business companion for every merchant.">
+  <title>UdyamAI — Your business, one step at a time</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="data.js" defer></script>
+  <script src="store.js" defer></script>
+  <script src="services.js" defer></script>
+  <script src="api.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <a class="brand" href="#page-home" aria-label="UdyamAI home">
+        <span class="brand-mark" aria-hidden="true">u</span>
+        <span>udyam<span class="brand-ai">ai</span></span>
+      </a>
+      <p class="sidebar-label">YOUR BUSINESS</p>
+      <nav class="nav-list">
+        <button class="nav-item active" data-page="home"><span aria-hidden="true">⌂</span> Home</button>
+        <button class="nav-item" data-page="stock"><span aria-hidden="true">▤</span> My stock</button>
+        <button class="nav-item" data-page="twin"><span aria-hidden="true">◉</span> Try an idea</button>
+        <button class="nav-item" data-page="insights"><span aria-hidden="true">↗</span> Business insights</button>
+        <button class="nav-item" data-page="campaigns"><span aria-hidden="true">▧</span> Campaign studio</button>
+        <button class="nav-item" data-page="autopilot"><span aria-hidden="true">✓</span> My action plan</button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="help-card">
+          <span class="help-icon" aria-hidden="true">✦</span>
+          <p><strong>Small steps count.</strong><br>Start with what you know. Add more whenever you're ready.</p>
+        </div>
+        <button class="nav-item" data-page="settings"><span aria-hidden="true">⚙</span> Settings</button>
+        <div class="profile">
+          <span class="avatar" aria-hidden="true">U</span>
+          <span><strong id="profileName">Your business</strong><small id="profileCategory">Getting started</small></span>
+        </div>
+      </div>
+    </aside>
+
+    <div class="main-column">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-mark" aria-hidden="true">u</span> udyam<span class="brand-ai">ai</span></div>
+        <div class="topbar-right">
+          <label class="language-picker"><span class="sr-only">Language</span>
+            <select id="languageSelect" aria-label="Choose language">
+              <option value="en">English</option>
+              <option value="hi">हिन्दी</option>
+            </select>
+          </label>
+          <label class="mode-picker"><span class="mode-label">Your view</span>
+            <select id="modeSelect" aria-label="Choose your experience level">
+              <option value="simple">Simple</option>
+              <option value="smart">Smart</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </label>
+          <button class="icon-button" data-page="settings" aria-label="Open settings">⚙</button>
+        </div>
+      </header>
+
+      <main id="main" tabindex="-1">
+        <div class="page-content">
+          <section class="page-view active" id="page-home" aria-labelledby="welcomeTitle">
+            <div class="welcome-row">
+              <div>
+                <p class="eyebrow" id="todayLabel">YOUR BUSINESS, AT YOUR PACE</p>
+                <h1 id="welcomeTitle">A little progress, every day.</h1>
+                <p class="lead" id="welcomeCopy">Welcome! Start with one small step. Your business information stays yours.</p>
+              </div>
+              <button class="sample-link" id="sampleButton">Explore a sample business <span aria-hidden="true">→</span></button>
+            </div>
+
+            <div class="sample-notice" id="sampleNotice" hidden>
+              <span aria-hidden="true">✦</span>
+              <span><strong>Sample business is on.</strong> These example numbers are not your business data.</span>
+              <button id="exitSample">Back to my business</button>
+            </div>
+
+            <section class="first-steps" id="firstSteps" aria-labelledby="stepsTitle">
+              <div class="section-heading">
+                <div><p class="eyebrow">A GOOD PLACE TO BEGIN</p><h2 id="stepsTitle">What would you like to do?</h2></div>
+                <span class="progress-pill"><span class="dot"></span> No setup needed</span>
+              </div>
+              <div class="action-grid">
+                <button class="action-card primary-action" id="recordSaleButton">
+                  <span class="action-icon sale-icon" aria-hidden="true">₹</span>
+                  <span><strong>Record today's sale</strong><small>Write down money you earned</small></span>
+                  <span class="card-arrow" aria-hidden="true">→</span>
+                </button>
+                <button class="action-card expense-action" id="expenseShortcut">
+                  <span class="action-icon expense-icon" aria-hidden="true">−</span>
+                  <span><strong>Add an expense</strong><small>Keep track of money spent</small></span>
+                  <span class="card-arrow" aria-hidden="true">→</span>
+                </button>
+                <button class="action-card" id="stockShortcut">
+                  <span class="action-icon stock-icon" aria-hidden="true">▤</span>
+                  <span><strong>Check my stock</strong><small>See what's on your shelf</small></span>
+                  <span class="card-arrow" aria-hidden="true">→</span>
+                </button>
+                <button class="action-card" id="askShortcut">
+                  <span class="action-icon ask-icon" aria-hidden="true">✦</span>
+                  <span><strong>Ask UdyamAI</strong><small>Get help in your own words</small></span>
+                  <span class="card-arrow" aria-hidden="true">→</span>
+                </button>
+              </div>
+            </section>
+
+            <section class="today-panel" id="todayPanel" aria-labelledby="todayHeading">
+              <div class="section-heading">
+                <div><p class="eyebrow">A SIMPLE DAILY CHECK-IN</p><h2 id="todayHeading">Today's picture</h2></div>
+                <button class="text-button" id="addExpenseButton">＋ Add an expense</button>
+              </div>
+              <div class="money-grid">
+                <article class="money-card"><span class="money-icon earned" aria-hidden="true">↗</span><span class="money-label">Money earned</span><strong id="salesValue">Nothing recorded yet</strong><small id="salesSub">Add a sale when you're ready</small></article>
+                <article class="money-card"><span class="money-icon spent" aria-hidden="true">↘</span><span class="money-label">Money spent</span><strong id="expenseValue">Nothing recorded yet</strong><small id="expenseSub">You can add expenses too</small></article>
+                <article class="money-card smart-metric" id="grossProfitCard" hidden><span class="money-icon note" aria-hidden="true">≈</span><span class="money-label">Estimated gross profit</span><strong id="grossProfitValue">Not enough cost details</strong><small id="grossProfitSub">Sales minus cost of items sold; before other expenses.</small></article>
+                <article class="money-card note-card"><span class="money-icon note" aria-hidden="true">✦</span><span class="money-label">A helpful next step</span><strong id="suggestionTitle">Tell us a little about your shop</strong><small id="suggestionSub">It helps UdyamAI give more useful suggestions.</small></article>
+                <article class="money-card task-reminder" id="taskReminder" hidden><span class="money-icon note" aria-hidden="true">✓</span><span class="money-label">One thing to do next</span><strong id="reminderTitle"></strong><button type="button" class="text-button" id="openTasks">View my action plan →</button></article>
+              </div>
+            </section>
+            <section class="history-panel" id="historyPanel" aria-labelledby="historyTitle" hidden>
+              <div class="section-heading"><div><p class="eyebrow">YOUR RECENT RECORDS</p><h2 id="historyTitle">Sales and spending</h2></div><button class="text-button" id="allTransactionsButton">View all</button></div>
+              <div id="transactionList" class="transaction-list"></div>
+            </section>
+
+            <section class="assistant-panel" id="assistantPanel" aria-labelledby="assistantTitle">
+              <div class="assistant-intro">
+                <span class="assistant-sparkle" aria-hidden="true">✦</span>
+                <div><p class="eyebrow">HERE WHEN YOU NEED A HAND</p><h2 id="assistantTitle">Ask UdyamAI</h2><p>Type the way you'd ask a helpful friend. You don't need special words.</p></div>
+              </div>
+              <div class="suggested-questions" aria-label="Suggested questions">
+                <button class="question-chip">How much did I earn today?</button>
+                <button class="question-chip">Which product should I stock more of?</button>
+                <button class="question-chip">Which products sell the most?</button>
+                <button class="question-chip">How can I improve my profit this weekend?</button>
+                <button class="question-chip">Create a festival offer for my shop.</button>
+              </div>
+              <form class="ask-form" id="askForm">
+                <label class="sr-only" for="askInput">Ask UdyamAI a question</label>
+                <input id="askInput" autocomplete="off" placeholder="Ask anything about your business…" required>
+                <button class="voice-button" type="button" aria-label="Voice input coming soon" title="Voice input coming soon" disabled aria-disabled="true">♩<span class="sr-only">Voice input coming soon</span></button>
+                <button class="send-button" type="submit">Ask <span aria-hidden="true">→</span></button>
+              </form>
+              <p class="privacy-note" id="assistantModeNote">Helpful starting replies use what you enter here; a live AI connection isn't set up in this preview. Voice input is coming soon.</p>
+              <div class="assistant-loading" id="assistantLoading" role="status" hidden><span></span>Thinking through your question…</div>
+              <div class="assistant-reply" id="assistantReply" role="region" aria-live="polite" aria-label="UdyamAI response" hidden></div>
+              <button class="outline-button squad-launch" id="squadButton" type="button">Ask the business team</button>
+            </section>
+
+            <section class="onboarding-strip">
+              <div class="onboarding-icon" aria-hidden="true">☀</div>
+              <div><strong>Make this feel like your business</strong><p>A few easy questions can help us make your suggestions more useful. Skip any question you like.</p></div>
+              <button class="outline-button" id="startOnboarding">Get started <span aria-hidden="true">→</span></button>
+            </section>
+          </section>
+
+          <section class="page-view" id="page-stock" aria-labelledby="stockTitle">
+            <div class="page-heading"><p class="eyebrow">KEEP AN EYE ON THE THINGS YOU SELL</p><h1 id="stockTitle">My stock</h1><p class="lead">Start with one product, or keep it simple and check stock on paper.</p></div>
+            <div class="empty-state" id="stockEmpty"><span class="empty-illustration" aria-hidden="true">▤</span><h2>Your stock list starts here</h2><p>You haven't added any products yet. No spreadsheet needed—add things one at a time when you're ready.</p><button class="button-primary" id="addProductButton">＋ Add a product</button></div>
+            <div class="product-area" id="productArea" hidden><div class="section-heading"><div><p class="eyebrow">YOUR PRODUCTS</p><h2 id="productCount">Products</h2></div><button class="button-primary" id="addProductButton2">＋ Add a product</button></div><label class="product-search" id="productSearchWrap" hidden>Find a product<input id="productSearch" type="search" placeholder="Type a product name"></label><div class="product-list" id="productList"></div><p class="no-products-found" id="noProductsFound" hidden>No products match that search.</p></div>
+            <div class="advanced-panel" hidden><strong>More ways to manage stock</strong><p>See stock by category, search products, and compare unit costs and selling prices. Add a stock quantity when you count your shelf.</p></div>
+          </section>
+
+          <section class="page-view" id="page-twin" aria-labelledby="twinTitle">
+            <div class="page-heading"><p class="eyebrow">THINK IT THROUGH BEFORE YOU TRY IT</p><h1 id="twinTitle">Try a business idea</h1><p class="lead">See what a small change might mean for your business. This is an estimate, not a promise.</p></div>
+            <div class="twin-card">
+              <div class="twin-prompt"><span class="twin-emoji" aria-hidden="true">🥥</span><div><span class="sample-tag">EXAMPLE IDEA</span><h2>What if you bought <span id="twinPromptQuantity">20 more coconuts</span> for tomorrow?</h2><p>Try this sample scenario, or enter your own numbers below.</p></div></div>
+              <form id="twinForm" class="twin-form">
+                <label>Product to compare<select id="twinProduct"><option value="">Custom numbers</option></select></label>
+                <label>Extra items to buy<input type="number" id="twinQuantity" value="20" min="0" inputmode="numeric"></label>
+                <label>Cost for each item <span class="field-hint">₹</span><input type="number" id="twinCost" value="20" min="0" step="0.5" inputmode="decimal"></label>
+                <label>Selling price for each <span class="field-hint">₹</span><input type="number" id="twinPrice" value="35" min="0" step="0.5" inputmode="decimal"></label>
+                <label class="advanced-scenario-field">Stock already available<input type="number" id="twinInventory" value="10" min="0" inputmode="numeric"></label>
+                <label class="advanced-scenario-field">Expected demand per day<input type="number" id="twinDemand" value="16" min="0" inputmode="numeric"></label>
+                <label class="advanced-scenario-field">Forecast period (days)<input type="number" id="twinPeriod" value="1" min="1" max="90" inputmode="numeric"></label>
+                <label class="advanced-scenario-field">Offer discount (%)<input type="number" id="twinDiscount" value="0" min="0" max="100" step="1" inputmode="numeric"></label>
+                <button class="button-primary" type="submit">Show me the estimate <span aria-hidden="true">→</span></button>
+              </form>
+              <div class="twin-result" id="twinResult" aria-live="polite">
+                <p class="eyebrow">ESTIMATES, NOT A PROMISE · BASED ON YOUR INPUTS</p>
+                <div class="scenario-columns">
+                  <article class="scenario-outcome"><h3>As things are</h3><p><span>Expected to sell</span><strong id="baselineUnits">10</strong></p><p><span>Estimated revenue</span><strong id="baselineRevenue">₹350</strong></p><p><span>Cost of items sold</span><strong id="baselineCogs">₹200</strong></p><p><span>Estimated gross profit</span><strong class="profit-value" id="baselineProfit">₹150</strong></p><p><span>Items left over</span><strong id="baselineUnsold">0</strong></p></article>
+                  <article class="scenario-outcome proposed"><h3>With your idea</h3><p><span>Expected to sell</span><strong id="proposedUnits">16</strong></p><p><span>Estimated revenue</span><strong id="proposedRevenue">₹560</strong></p><p><span>Cost of items sold</span><strong id="proposedCogs">₹320</strong></p><p><span>Estimated gross profit</span><strong class="profit-value" id="proposedProfit">₹240</strong></p><p><span>Items left over</span><strong id="proposedUnsold">14</strong></p></article>
+                </div>
+                <p class="assumption" id="twinExplanation">Expected units sold cannot exceed available stock. Gross profit excludes other shop expenses and unsold stock.</p>
+              </div>
+              <div class="advanced-controls" hidden><h3>Scenario assumptions</h3><p>Demand is your estimate per day. Forecasted demand is multiplied by the period, then capped at available stock. A discount changes the selling price, not the demand assumption.</p><p class="advanced-estimate">Potential cash tied up in leftover stock: <strong id="unsoldCost">₹0</strong></p><button type="button" class="outline-button" id="saveScenarioButton">Save this scenario</button></div>
+              <section class="saved-scenarios advanced-controls" id="savedScenarios" hidden><h3>Saved comparisons</h3><div id="scenarioList" class="scenario-list"></div></section>
+              <div class="promotion-tool" id="promotionTool" hidden>
+                <p class="eyebrow">COMPARE A PROMOTION</p><h3>Would an offer leave you better off?</h3><p class="promotion-help">Enter your own prices and expected quantities. This compares gross margin only—it is not a sales forecast.</p>
+                <form id="promotionForm" class="promotion-form">
+                  <label>Cost per item <span class="field-hint">₹</span><input id="promoCost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Your cost" required></label>
+                  <label>Usual selling price <span class="field-hint">₹</span><input id="regularPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Usual price" required></label>
+                  <label>Offer selling price <span class="field-hint">₹</span><input id="offerPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Offer price" required></label>
+                  <label>Expected usual sales<input id="regularUnits" type="number" min="0" step="1" inputmode="numeric" placeholder="Items" required></label>
+                  <label>Expected sales with offer<input id="offerUnits" type="number" min="0" step="1" inputmode="numeric" placeholder="Items" required></label>
+                  <button class="button-primary" type="submit">Compare the two ideas</button>
+                </form>
+                <div class="promotion-result" id="promotionResult" role="status" aria-live="polite" hidden></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-view" id="page-insights" aria-labelledby="insightsTitle">
+            <div class="page-heading"><p class="eyebrow">UNDERSTAND WHAT'S WORKING</p><h1 id="insightsTitle">Business insights</h1><p class="lead">Your business picture will become clearer as you record sales, expenses and products.</p></div>
+            <div class="insights-empty" id="insightsEmpty"><span class="empty-illustration" aria-hidden="true">↗</span><h2>Your insights will grow with your records</h2><p id="insightsEmptyCopy">We don't have enough of your business information to show meaningful trends yet. Add a sale or explore clearly marked sample data to see how insights work.</p><div class="empty-actions"><button class="button-primary" id="insightsSale">Record a sale</button><button class="outline-button" id="insightsSample">Explore sample business</button></div></div>
+            <section class="live-insights" id="liveInsights" hidden>
+              <div class="section-heading"><div><p class="eyebrow">USING THE PRICES YOU ENTERED</p><h2>Product margins and stock</h2></div><span class="progress-pill">Your entries, not a forecast</span></div>
+              <p class="live-insights-help">Per-item gross margin is selling price minus unit cost. It does not include other expenses and is not the same as profit.</p>
+              <div class="margin-list" id="marginList"></div>
+            </section>
+            <section class="live-insights" id="recordInsights" hidden>
+              <div class="section-heading"><div><p class="eyebrow">YOUR RECORDED ACTIVITY · LAST 7 DAYS</p><h2>Sales and expenses</h2></div></div>
+              <div class="money-grid record-metrics"><article class="money-card"><span class="money-label">Recorded sales</span><strong id="weeklySales">₹0</strong><small id="weeklySalesNote">From your entries</small></article><article class="money-card"><span class="money-label">Recorded expenses</span><strong id="weeklyExpenses">₹0</strong><small id="weeklyExpenseNote">Separate from cost of goods sold</small></article><article class="money-card"><span class="money-label">Gross profit</span><strong id="weeklyGrossProfit">Not enough cost details</strong><small>Only shown when sales have cost details; before other expenses.</small></article></div>
+              <div class="chart-card"><p class="eyebrow">RECORDED SALES · LAST 7 DAYS</p><div class="bar-chart" id="recordBarChart" role="img" aria-label="Recorded sales for the last seven days"></div></div>
+            </section>
+            <div class="sample-insights" id="sampleInsights" hidden>
+              <div class="sample-notice"><span aria-hidden="true">✦</span><span><strong>Sample data only.</strong> These figures are for demonstration, not a forecast.</span></div>
+              <div class="money-grid"><article class="money-card"><span class="money-label">Example weekly sales</span><strong>₹8,450</strong><small>Across 42 example sales</small></article><article class="money-card"><span class="money-label">Example expenses</span><strong>₹3,200</strong><small>Sample business records</small></article><article class="money-card note-card"><span class="money-label">Top example product</span><strong>Fresh coconuts</strong><small>18 sold in this sample week</small></article></div>
+              <div class="chart-card"><div><p class="eyebrow">SAMPLE ONLY · LAST 7 DAYS</p><h2>Sales through the week</h2></div><div class="bar-chart" role="img" aria-label="Example sales chart, Monday to Sunday"><span style="--bar:35%"><i>Mon</i></span><span style="--bar:55%"><i>Tue</i></span><span style="--bar:42%"><i>Wed</i></span><span style="--bar:78%"><i>Thu</i></span><span style="--bar:60%"><i>Fri</i></span><span style="--bar:100%"><i>Sat</i></span><span style="--bar:48%"><i>Sun</i></span></div></div>
+            </div>
+            <div class="advanced-panel" hidden><strong>Detailed analysis</strong><p>Margin comparisons, product-level trends and configurable reports can be explored here when you add your records.</p></div>
+          </section>
+
+          <section class="page-view" id="page-campaigns" aria-labelledby="campaignTitle">
+            <div class="page-heading"><p class="eyebrow">A READY-TO-EDIT MESSAGE FOR YOUR CUSTOMERS</p><h1 id="campaignTitle">Campaign studio</h1><p class="lead">Create a friendly offer draft. Nothing is sent to customers from this preview.</p></div>
+            <div class="studio-layout">
+              <form class="settings-card campaign-form" id="campaignForm">
+                <h2>Tell us about your offer</h2>
+                <label>What would you like to achieve?<select id="campaignObjective"><option value="more_visits">Bring more people to my shop</option><option value="clear_stock">Sell extra stock</option><option value="thank_customers">Thank my regular customers</option><option value="new_product">Introduce a product</option></select></label>
+                <label>Product<select id="campaignProduct"></select></label>
+                <label>Offer or discount<input id="campaignOffer" maxlength="80" placeholder="e.g. ₹5 off or a free lime"></label>
+                <label>Who is this for?<input id="campaignAudience" maxlength="80" value="Customers nearby"></label>
+                <label>Message language<select id="campaignLanguage"><option value="en">English</option><option value="hi">हिन्दी</option></select></label>
+                <label>Message tone<select id="campaignTone"><option value="friendly">Friendly</option><option value="festive">Festive</option><option value="simple">Short and simple</option></select></label>
+                <button class="button-primary" type="submit">Create a draft</button>
+              </form>
+              <section class="campaign-preview" aria-labelledby="campaignPreviewTitle">
+                <div class="section-heading"><div><p class="eyebrow">DRAFT ONLY · NOT SENT</p><h2 id="campaignPreviewTitle">WhatsApp message preview</h2></div><span class="draft-badge">Preview</span></div>
+                <label class="sr-only" for="campaignCopy">Edit campaign message</label><textarea id="campaignCopy" rows="6" placeholder="Your editable message will appear here."></textarea>
+                <div class="creative-preview"><span class="creative-sparkle" aria-hidden="true">✦</span><div><small>YOUR SHOP · A FRIENDLY OFFER</small><strong id="creativeHeadline">Your next lovely find is here</strong><span id="creativeOffer">Add an offer to see it in this preview</span></div></div>
+                <div class="campaign-actions"><button class="outline-button" id="regenerateCampaign" type="button">Regenerate</button><button class="outline-button" id="copyCampaign" type="button">Copy message</button><button class="button-primary" id="saveCampaign" type="button">Save draft</button></div>
+                <p class="privacy-note" id="campaignSource">Demo copy · not connected to a live AI service. Review before sharing.</p>
+              </section>
+            </div>
+            <section class="history-panel"><div class="section-heading"><div><p class="eyebrow" id="campaignStorageLabel">SAVED ON THIS DEVICE</p><h2>Saved campaign drafts</h2></div></div><div id="campaignList" class="campaign-list"></div></section>
+          </section>
+
+          <section class="page-view" id="page-autopilot" aria-labelledby="autopilotTitle">
+            <div class="page-heading"><p class="eyebrow">A PLAN YOU REVIEW AND CONTROL</p><h1 id="autopilotTitle">My action plan</h1><p class="lead" id="autopilotLead">Turn a goal into helpful next steps. This preview only updates your local checklist—no orders or messages are sent.</p></div>
+            <form class="goal-form" id="goalForm"><label class="sr-only" for="goalInput">What would you like to prepare for?</label><input id="goalInput" maxlength="120" placeholder="e.g. Prepare my shop for the weekend" required><button class="button-primary" type="submit">Make a plan</button></form>
+            <div class="plan-card" id="planCard" hidden><div class="section-heading"><div><p class="eyebrow">YOUR SUGGESTED CHECKLIST</p><h2 id="planTitle">A few steps to get ready</h2></div><button class="text-button" id="rejectPlan" type="button">Clear plan</button></div><div id="planTaskList" class="task-list"></div><div class="plan-approval"><span>Buying, spending and contacting customers always need your separate approval.</span><button class="outline-button" id="approvePlan" type="button">Approve this checklist</button></div></div>
+            <section class="history-panel"><div class="section-heading"><div><p class="eyebrow">YOUR SAVED TASKS</p><h2>Things to do</h2></div></div><div id="taskList" class="task-list"></div></section>
+          </section>
+
+          <section class="page-view" id="page-settings" aria-labelledby="settingsTitle">
+            <div class="page-heading"><p class="eyebrow">MAKE UDYAMAI WORK FOR YOU</p><h1 id="settingsTitle">Settings</h1><p class="lead">Choose how much detail you'd like to see. You can change this any time.</p></div>
+            <div class="settings-card"><h2>Choose your view</h2><p>It's a preference, not a permanent label. Change it whenever you like.</p>
+              <label class="mode-option"><input type="radio" name="settingsMode" value="simple"><span><strong>Simple</strong><small>Big buttons, everyday words and only the essentials.</small></span></label>
+              <label class="mode-option"><input type="radio" name="settingsMode" value="smart"><span><strong>Smart</strong><small>See growth suggestions, product performance and helpful comparisons.</small></span></label>
+              <label class="mode-option"><input type="radio" name="settingsMode" value="advanced"><span><strong>Advanced</strong><small>Explore detailed controls, assumptions and analysis.</small></span></label>
+            </div>
+            <div class="settings-card"><h2>Explore a demo business</h2><p>Demo records are clearly marked and separate from your own information.</p><label class="inline-select">Business <select id="merchantSelect"><option value="personal">My business</option><option value="coconut">Coconut street vendor</option><option value="kirana">Kirana store</option></select></label></div>
+            <div class="settings-card"><h2>Connect to the backend</h2><p>Optional development connection. When connected, new sales, expenses, products and drafts are saved to the server. Your bearer token stays in memory until you refresh.</p>
+              <label class="inline-select">Backend address <input id="backendUrl" type="url" value="http://127.0.0.1:8000" autocomplete="url"></label>
+              <label class="inline-select">Merchant access token <input id="backendToken" type="password" autocomplete="off" placeholder="Paste a configured merchant token"></label>
+              <div class="dialog-actions"><button class="button-primary" id="connectBackend" type="button">Connect and load records</button><button class="outline-button" id="disconnectBackend" type="button">Disconnect</button></div>
+              <p id="backendStatus" role="status" aria-live="polite">Not connected. This preview continues to work with local browser storage.</p>
+            </div>
+            <div class="settings-card"><h2>Your information</h2><p id="localDataDescription">Sales, expenses, products, drafts and preferences are saved locally on this device. Demo data is separate from your own records.</p><button class="outline-button" id="resetButton">Clear my saved information</button></div>
+            <div class="settings-card"><h2>Language</h2><p>Pick a language you're comfortable using.</p><label class="inline-select">App language <select id="settingsLanguage"><option value="en">English</option><option value="hi">हिन्दी</option></select></label></div>
+          </section>
+        </div>
+        <footer class="app-footer"><span>Made for the way you do business.</span><span>UdyamAI preview <span class="footer-dot">·</span> <span id="dataStorageNote">Your data stays on this device</span></span></footer>
+      </main>
+    </div>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Quick navigation">
+    <button class="active" data-page="home"><span aria-hidden="true">⌂</span><small>Home</small></button>
+    <button data-page="stock"><span aria-hidden="true">▤</span><small>Stock</small></button>
+    <button data-page="twin"><span aria-hidden="true">◉</span><small>Try an idea</small></button>
+    <button data-page="campaigns"><span aria-hidden="true">▧</span><small>Campaigns</small></button>
+    <button data-page="autopilot"><span aria-hidden="true">✓</span><small>Tasks</small></button>
+    <button data-page="settings"><span aria-hidden="true">⚙</span><small>Settings</small></button>
+  </nav>
+
+  <dialog id="saleDialog" class="app-dialog">
+    <form id="saleForm" class="dialog-card">
+      <button type="button" class="dialog-close" data-close="saleDialog" aria-label="Close">×</button>
+      <p class="eyebrow">A QUICK NOTE FOR YOUR RECORDS</p><h2 id="saleDialogTitle">Record today's sale</h2><p class="dialog-copy">Choose a product or write down what you sold. Enter a total if you don't have a product list.</p>
+      <label for="saleProduct">Product <span class="optional-label">Optional</span></label><select id="saleProduct"><option value="">No product / enter total</option></select>
+      <label for="saleManualName">What did you sell? <span class="optional-label">Optional</span></label><input id="saleManualName" type="text" maxlength="60" placeholder="e.g. Fresh coconuts">
+      <div class="form-columns"><label for="saleQuantity">Quantity<input id="saleQuantity" type="number" min="1" step="1" inputmode="numeric" value="1" required></label><label for="saleUnitPrice">Price each · ₹<input id="saleUnitPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Price"></label></div>
+      <label id="saleAmountLabel" for="saleAmount">Or enter total earned · ₹</label><input id="saleAmount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="e.g. 500">
+      <div class="form-columns"><label for="saleDate">Sale date<input id="saleDate" type="date" required></label><label id="saleNoteLabel" for="saleNote">Note <span class="optional-label">Optional</span><input id="saleNote" type="text" maxlength="80" placeholder="e.g. Morning sales"></label></div>
+      <p class="form-error" id="saleError" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="outline-button" data-close="saleDialog">Not now</button><button class="button-primary" id="saleSubmit" type="submit">Save sale</button></div>
+    </form>
+  </dialog>
+  <dialog id="expenseDialog" class="app-dialog">
+    <form id="expenseForm" class="dialog-card">
+      <button type="button" class="dialog-close" data-close="expenseDialog" aria-label="Close">×</button>
+      <p class="eyebrow">KEEP A NOTE OF WHAT YOU SPEND</p><h2>Add an expense</h2><p class="dialog-copy">For example, supplies, travel or a shop bill.</p>
+      <label id="expenseAmountLabel" for="expenseAmount">How much did you spend? · ₹</label><input id="expenseAmount" type="number" min="0.01" step="0.01" inputmode="decimal" placeholder="e.g. 120" required>
+      <label for="expenseCategory">Type of expense<select id="expenseCategory" required><option value="Stock">Products / stock</option><option value="Supplies">Shop supplies</option><option value="Utilities">Electricity / utilities</option><option value="Travel">Travel</option><option value="Other">Something else</option></select></label>
+      <div class="form-columns"><label for="expenseDate">Date<input id="expenseDate" type="date" required></label><label id="expenseNoteLabel" for="expenseNote">Note <span class="optional-label">Optional</span><input id="expenseNote" type="text" maxlength="80" placeholder="e.g. Supplies"></label></div>
+      <p class="form-error" id="expenseError" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="outline-button" data-close="expenseDialog">Not now</button><button class="button-primary" id="expenseSubmit" type="submit">Save expense</button></div>
+    </form>
+  </dialog>
+  <dialog id="onboardingDialog" class="app-dialog">
+    <form id="onboardingForm" class="dialog-card">
+      <button type="button" class="dialog-close" data-close="onboardingDialog" aria-label="Close">×</button>
+      <div class="wizard-progress"><span id="wizardProgressBar"></span></div>
+      <p class="eyebrow" id="wizardStepLabel">A FEW EASY QUESTIONS · 1 OF 3</p><h2 id="wizardQuestion">What kind of business do you run?</h2>
+      <div id="wizardChoices" class="wizard-choices"></div>
+      <label class="wizard-text-label" id="wizardTextLabel" for="wizardInput" hidden></label><input id="wizardInput" type="text" maxlength="100" hidden>
+      <p class="form-error" id="wizardError" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="text-button" id="wizardBack">Back</button><button type="button" class="text-button" id="skipWizard">Skip for now</button><button class="button-primary" id="wizardNext" type="button">Next <span aria-hidden="true">→</span></button></div>
+      <button type="button" class="sample-link wizard-sample" id="wizardSample">Or explore a sample business</button>
+    </form>
+  </dialog>
+  <dialog id="productDialog" class="app-dialog">
+    <form id="productForm" class="dialog-card">
+      <button type="button" class="dialog-close" data-close="productDialog" aria-label="Close">×</button>
+      <p class="eyebrow">ADD ONE THING AT A TIME</p><h2>Add a product</h2><p class="dialog-copy">A name is enough to begin. You can add details later.</p>
+      <label id="productNameLabel" for="productName">What do you sell?</label><input id="productName" type="text" maxlength="60" placeholder="e.g. Rice" required>
+      <label id="productQuantityLabel" for="productQuantity">How many do you have? <span class="optional-label">Optional</span></label><input id="productQuantity" type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 12">
+      <div class="advanced-product-fields" id="advancedProductFields" hidden><p>Optional details for product margins</p><label for="productCost">Cost per item · ₹</label><input id="productCost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Your cost"><label for="productPrice">Selling price · ₹</label><input id="productPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Your price"></div>
+      <div class="dialog-actions"><button type="button" class="outline-button" data-close="productDialog">Not now</button><button class="button-primary" id="productSubmit" type="submit">Save product</button></div>
+    </form>
+  </dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
