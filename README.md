@@ -1,12 +1,59 @@
 # UdyamAI
 
-UdyamAI is a merchant-first business assistant. The existing lightweight frontend is preserved, with an optional FastAPI backend for persistent records, transparent calculations, assistant recommendations, campaign drafts, and controlled task checklists.
+**A merchant-first business copilot for everyday decisions.**
+
+UdyamAI helps small-business owners keep track of sales, expenses, products, and practical next steps. It combines a lightweight, bilingual web interface with an optional FastAPI service for persistent records, evidence-based business insights, scenario calculations, assistant recommendations, campaign drafts, and task checklists.
+
+The project is designed to be transparent: calculations use recorded data and deterministic business rules; demo data is labeled; and suggested campaigns or tasks never send messages, place orders, or spend money.
+
+## Highlights
+
+- **Simple business records:** Track sales, expenses, products, and stock counts.
+- **Business overview:** Review daily totals, recent transactions, and supported business insights.
+- **Business Twin:** Compare user-entered business scenarios with deterministic calculations.
+- **Assistant:** Ask business questions in English or Hindi using local demo responses or the optional backend AI integration.
+- **Voice assistant:** Open the persistent microphone control from any page. Where the browser supports the Web Speech API, speak a request, review or edit its transcript, and hear the assistant response. Text input remains available when speech recognition is unsupported or unavailable.
+- **Campaign Studio:** Create, edit, and save promotional drafts. Drafts are never sent.
+- **Action plan:** Turn a goal into a checklist that the merchant can review and manage.
+- **Flexible storage:** Run entirely in the browser with local storage, or connect to the optional API and database.
+- **Demo merchants:** Explore separate sample businesses without mixing their records with personal data.
+
+## Architecture
+
+```text
+frontend/                 Static HTML, CSS, and JavaScript application
+  index.html              Accessible application shell and screens
+  app.js                  UI rendering, navigation, and interactions
+  api.js                  Optional backend API client
+  data.js, store.js        Demo data and browser-local storage
+  services.js              Local deterministic assistant and business logic
+  styles.css              Application styling
+
+backend/
+  app/api/                 FastAPI routes and authorization
+  app/agents/              Evidence-based recommendation workflow
+  app/core/                Application configuration
+  app/db/                  SQLAlchemy database setup
+  app/models/              Database entities
+  app/schemas/             Request and response validation
+  app/services/            Calculations, intelligence, and assistant services
+  migrations/              Alembic database migrations
+  tests/                   API and calculation tests
+```
+
+The frontend has no JavaScript package installation step. The backend uses SQLAlchemy and supports SQLite for local development and PostgreSQL for deployment.
+
+## Requirements
+
+- Python 3.12 (the commands below use the Python launcher on Windows)
+- A modern browser
+- Optional: an OpenAI-compatible chat-completions API key and model for live AI-generated responses
 
 ## Run locally
 
-### Backend
+### 1. Set up the backend
 
-PowerShell:
+From PowerShell:
 
 ```powershell
 cd C:\Users\shiva\UdyamAI\backend
@@ -16,9 +63,7 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-The copied `.env.example` is configured for the local SQLite development database and demo-only merchant tokens. For a PostgreSQL database, change `DATABASE_URL` in `.env` to a PostgreSQL SQLAlchemy URL and make sure that server/database is available.
-
-Run migrations, seed the two illustrative merchants, and start the API:
+The example configuration uses a local SQLite database and development-only merchant tokens. Apply migrations, load illustrative demo merchants, and start the API:
 
 ```powershell
 python -m alembic upgrade head
@@ -26,9 +71,9 @@ python -m app.seed
 python -m uvicorn app.main:app --reload
 ```
 
-The API is at `http://127.0.0.1:8000`. OpenAPI docs are at `http://127.0.0.1:8000/docs`; health is at `http://127.0.0.1:8000/api/health`.
+The API runs at `http://127.0.0.1:8000`. Visit `http://127.0.0.1:8000/docs` for the interactive API reference or `http://127.0.0.1:8000/api/health` for the health check.
 
-### Frontend
+### 2. Serve the frontend
 
 In a second PowerShell window:
 
@@ -37,76 +82,90 @@ cd C:\Users\shiva\UdyamAI\frontend
 py -3.12 -m http.server 5173 --bind 127.0.0.1
 ```
 
-Open `http://127.0.0.1:5173`. The frontend can still be opened directly as `frontend\index.html` and used offline with browser-local storage. For backend use, serve it over HTTP as above (the restricted CORS policy does not allow the `file://` origin), then open **Settings → Connect to the backend**, keep the URL at `http://127.0.0.1:8000`, and enter the token for the selected merchant from your local `.env`. The development examples are `dev-personal-token`, `dev-coconut-token`, and `dev-kirana-token`. Tokens are held in memory only and cleared on refresh. Demo merchants are read-only.
+Open `http://127.0.0.1:5173`. The app can also be opened directly from `frontend\index.html` for browser-local use. A `file://` page cannot connect to the configured backend because of browser origin restrictions; use the local HTTP server when you want backend features.
 
-## Configuration and AI behavior
+### 3. Connect the app to the backend (optional)
 
-Backend configuration is loaded from environment variables or `backend\.env`. See [backend/.env.example](./backend/.env.example) for the available settings. API credentials for an OpenAI-compatible chat-completions endpoint are backend-only:
+In UdyamAI, open **Settings → Connect to the backend**:
 
-- `LLM_BASE_URL`
-- `LLM_API_KEY`
-- `LLM_MODEL`
-- `AI_TIMEOUT_SECONDS`
-- `AI_REQUESTS_PER_MINUTE`
-- `INTELLIGENCE_CHANGE_THRESHOLD` — relative period change needed before recording a sales or expense alert (default `0.25`).
+1. Keep the backend address as `http://127.0.0.1:8000`.
+2. Select the merchant you intend to use.
+3. Enter that merchant's token from `backend\.env`.
+4. Select **Connect and load records**.
 
-Without both `LLM_API_KEY` and `LLM_MODEL`, the assistant and campaign generator explicitly report demo mode and use deterministic local responses. With configuration, the backend makes one bounded LLM call per assistant or campaign-generation request. Calculation results are produced by deterministic Python code, not the model.
+The bundled `dev-personal-token`, `dev-coconut-token`, and `dev-kirana-token` values are for local development only. The frontend keeps the token in memory and clears it when the page is refreshed. Seeded demo merchants are read-only.
 
-## Backend layout
+## Configuration
 
-- `backend/app/api/` — authenticated REST endpoints and request limits.
-- `backend/app/schemas/` — Pydantic input/output validation.
-- `backend/app/models/` — SQLAlchemy merchant and business entities.
-- `backend/app/db/` — database engine and session lifecycle.
-- `backend/app/services/` — deterministic financial calculations and replaceable LLM integration.
-- `backend/app/agents/` — modular Growth, Inventory, Profit, Marketing, and Coordinator evidence workflow.
-- `backend/migrations/` — Alembic migrations.
-- `backend/app/seed.py` — separate coconut-vendor and kirana demo records plus an empty personal merchant.
-- `backend/tests/` — calculation and API tests.
+Backend settings are read from environment variables and `backend\.env`. See [`backend/.env.example`](./backend/.env.example).
 
-The existing vanilla HTML/CSS/JavaScript UI remains in [frontend/](./frontend/). It has not been rebuilt as React: preserving its working merchant-oriented screens and standalone use avoids an unrelated frontend rewrite. [frontend/api.js](./frontend/api.js) centralizes optional API calls.
+| Setting | Purpose |
+| --- | --- |
+| `DATABASE_URL` | SQLAlchemy database URL; defaults to local SQLite. |
+| `CORS_ORIGINS` | Comma-separated frontend origins allowed to call the API. |
+| `MERCHANT_TOKENS` | JSON map of merchant IDs to distinct bearer tokens. |
+| `LLM_BASE_URL` | Base URL for an OpenAI-compatible chat-completions API. |
+| `LLM_API_KEY` | Backend-only provider credential. |
+| `LLM_MODEL` | Model name used for assistant and campaign generation. |
+| `AI_TIMEOUT_SECONDS` | Maximum duration for a provider request. |
+| `AI_REQUESTS_PER_MINUTE` | Per-merchant limit for assistant and campaign requests. |
+| `INTELLIGENCE_CHANGE_THRESHOLD` | Relative change threshold for supported sales/expense insights. |
+
+When both `LLM_API_KEY` and `LLM_MODEL` are set, the backend can use the configured provider for assistant recommendations and campaign copy. Without them, it returns clearly labeled deterministic demo responses. Financial metrics and scenario results are computed by application code, not invented by the language model. Never put provider credentials in frontend code.
+
+## Voice assistant
+
+The persistent microphone button is available on every application page. Select it to open the assistant, then start listening from the microphone control. The transcript can be reviewed or corrected before sending. The response is displayed in the panel and can be read aloud using browser speech synthesis; speech can be muted.
+
+Speech recognition and speech synthesis depend on browser and device support. Microphone access is requested only after the user activates listening, and may require permission and a secure browser context. If recognition is unsupported or permission is denied, use the text-input fallback. Hindi recognition uses the browser's `hi-IN` locale when selected; English uses `en-US`. Mixed Hindi-English recognition quality and voice availability vary by browser and installed language packs.
+
+Voice and typed questions share the existing assistant path. Connecting to the backend enables merchant-scoped server recommendations; without a backend, the interface uses local demo behavior. The assistant does not execute business actions through voice.
+
+## Data and business logic
+
+- Personal records can be stored in browser local storage or in the backend, depending on the selected mode.
+- SQLite is the default local database. PostgreSQL is supported through SQLAlchemy; configure `DATABASE_URL` and ensure the database is available before running migrations.
+- A recorded sales total is not the same as profit. Gross profit is reported only when sale-cost information is available and does not subtract operating expenses.
+- Business Twin results use the assumptions entered by the user; they are scenarios, not forecasts.
+- Business insights are generated from available recorded data and deterministic thresholds. Incomplete records can produce incomplete or unavailable findings.
+- Inventory replenishment estimates require the necessary sales history, a stock count, and supplier lead-time information.
+- Campaigns are editable drafts. Action plans are checklists. UdyamAI does not send promotions, place supplier orders, process payments, or contact customers.
 
 ## API overview
 
-Business endpoints are scoped to `/api/merchants/{merchant_id}` and require that merchant's configured `Authorization: Bearer …` token:
+Business routes are scoped to `/api/merchants/{merchant_id}` and require the merchant's bearer token. The API validates request and response schemas and returns structured errors.
 
-- `GET/PATCH /merchants/{id}` — read or update an authorized merchant.
-- `GET/POST/PATCH/DELETE /merchants/{id}/products` — product list and product management (item routes take `/{product_id}`).
-- `GET/POST/DELETE /merchants/{id}/sales` and `/expenses` — append/list records and delete by ID; linked sale creation checks inventory and records cost of goods when known.
-- `POST /merchants/{id}/products/{product_id}/inventory`, `GET` same path — record and list inventory counts.
-- `GET /merchants/{id}/summary?on=YYYY-MM-DD` — recorded daily totals; gross profit is omitted when sale costs are incomplete, and recorded expenses are not treated as net profit.
-- `POST /merchants/{id}/intelligence/analyze`, `GET /insights`, `PATCH /insights/{insight_id}` — deterministic, merchant-scoped Business Pulse analysis, persisted/deduplicated findings, and read/save/dismiss state.
-- `GET /merchants/{id}/inventory-risks` — stock coverage and suggested replenishment only when recent sales, stock count, and supplier lead time support the estimate.
-- `GET/POST /merchants/{id}/outcomes`, `PATCH /outcomes/{outcome_id}` — record a selected recommendation, its baseline/assumptions, and later-entered outcomes with an explicit fair-comparison flag.
-- `POST /merchants/{id}/scenarios/calculate` — deterministic Business Twin simulation; `POST/GET/DELETE /scenarios` — save/list/delete simulations.
-- `POST /merchants/{id}/assistant`, `GET /recommendations` — one structured recommendation and its history.
-- `POST /merchants/{id}/campaigns/generate` — editable generated/mock copy; `GET/POST/PATCH/DELETE /campaigns` — draft lifecycle only.
-- `GET/POST /merchants/{id}/tasks`, `POST /tasks/plan`, `PATCH/DELETE /tasks/{task_id}`, `GET /tasks/history` — proposal, proposed-task edits, approval/rejection, checklist status, and action history. Approval never executes an external action.
+| Capability | Routes |
+| --- | --- |
+| Merchant, products, sales, expenses | `/merchants/{id}`, `/products`, `/sales`, `/expenses` |
+| Summary and inventory | `/summary`, `/products/{product_id}/inventory`, `/inventory-risks` |
+| Business intelligence | `/intelligence/analyze`, `/insights`, `/outcomes` |
+| Business Twin | `/scenarios/calculate`, `/scenarios` |
+| Assistant | `/assistant`, `/assistant/team`, `/recommendations` |
+| Campaign drafts | `/campaigns/generate`, `/campaigns` |
+| Tasks and checklists | `/tasks/plan`, `/tasks`, `/tasks/history` |
 
-Errors use a consistent JSON envelope (`error` and `message`; validation errors also include safe field details). Swagger lists the request and response schemas.
+All routes are prefixed by `/api/merchants/{merchant_id}` unless otherwise noted in the interactive API documentation.
 
-## Data, access, and limitations
+## Tests
 
-- PostgreSQL is supported via SQLAlchemy; SQLite is the zero-setup local development default. Apply schema changes through Alembic migrations.
-- Demo merchants are seeded separately and are read-only. Personal records use the `personal` merchant ID.
-- The current bearer-token map is a **development authorization foundation**, not a complete production identity system. Configure a unique random token per merchant. Do not use the bundled development tokens outside a local demo. Before deploying for real users, integrate a proper identity provider, secure tenant provisioning and token rotation, enforce HTTPS, and configure production CORS and rate limiting.
-- LLM provider calls, if configured, send the user's question and authorized merchant context from the backend. Never place LLM credentials in the frontend.
-- Demand is user-entered in Business Twin scenarios; it is not forecast from history. Gross profit excludes operating expenses and unsold stock remains inventory. No net-profit claim is made.
-- Business Pulse uses deterministic rules only: week-over-week sales need at least three recorded selling days in each comparison week; expense changes need multiple entries across multiple days in both weeks; inventory rates need at least three units sold over at least three days in the past 30 days and a known on-hand count. It compares recorded entries, which may be incomplete. Inventory replenishment quantities are shown only when supplier lead time is known; otherwise the UI labels stock coverage as uncertain and does not suggest a quantity.
-- Product margin alerts require recent sales across at least three days plus an entered unit cost. They use the current entered cost and recent recorded sale amounts; no monetary growth impact is guessed.
-- Insights are refreshed on demand from the dashboard; there is no scheduler, push notification, or WhatsApp integration. Repeated findings update their existing record rather than creating repeated alerts. Saved older findings are marked as earlier analysis and may no longer be current.
-- Intelligence does not use an LLM to calculate metrics. The configured threshold controls relative sales/expense changes; AI failures therefore cannot interrupt deterministic analysis. Outcome records support later observations but do not establish that a recommendation caused a change.
-- Long-term seasonality analysis and automated forecasting are not implemented. "Established" maturity reflects the amount and span of recorded sales history, not a promise of seasonal accuracy.
-- The demo agent coordinator produces structured evidence from the merchant's records; its role outputs are deterministic workflow results rather than separate LLM personas/calls.
-- Campaigns are saved drafts only. Tasks are checklists only. No supplier orders, messages, payments, or third-party business actions are executed.
-- In offline mode the frontend continues to use localStorage and its existing deterministic mock services. Backend connection is opt-in under Settings. Backend mutations update the server first, and local UI state only after success.
-- Voice recognition, payment integrations, customer records, reliable demand forecasting, merchant self-registration, and production-grade user login are not implemented.
-
-## Verify
+Run the backend tests from the `backend` directory:
 
 ```powershell
 cd C:\Users\shiva\UdyamAI\backend
 python -m pytest -q
 ```
 
-The tests cover financial edge cases, validation, merchant-scoped authorization, inventory-aware sale creation, scenario persistence, demo fallback responses, campaign persistence, task approval history, evidence sufficiency, trend deduplication/dismissal, inventory risk, and outcome tracking.
+The test suite covers calculations, API validation, merchant scoping, record persistence, scenario handling, assistant fallback behavior, campaign drafts, task workflows, intelligence evidence, and outcomes.
+
+## Security and deployment notes
+
+The included token map is a local development foundation, not a production identity system. Before deploying for real merchants:
+
+- Replace all development tokens with strong, unique credentials and establish secure provisioning and rotation.
+- Integrate a production-grade identity provider and enforce tenant isolation.
+- Serve the application over HTTPS and configure CORS to allow only trusted origins.
+- Store provider credentials and database secrets in a managed secret store or protected environment configuration.
+- Add production-appropriate rate limiting, monitoring, backups, and operational controls.
+
+UdyamAI is a development project and does not provide accounting, tax, financial, or demand-forecasting guarantees.

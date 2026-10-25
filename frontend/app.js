@@ -12,6 +12,13 @@ let trackedOutcomes = [];
 let insightLoading = false;
 let insightError = '';
 
+const voiceState = {
+  muted: false,
+  listening: false,
+  recognition: null,
+  supported: typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
+};
+
 function saveState() {
   if (window.UdyamAPI.connected()) window.UdyamStore.savePreferences();
   else window.UdyamStore.save();
@@ -597,7 +604,7 @@ function applyLanguage() {
     '.assistant-intro p:last-child': 'जैसे किसी मददगार दोस्त से पूछते हैं, वैसे ही लिखें।',
     '#askInput': 'अपने कारोबार के बारे में कुछ भी पूछें…',
     '.send-button': 'पूछें →',
-    '.privacy-note': 'जवाब यहाँ दी गई जानकारी पर आधारित हैं; इस प्रीव्यू में लाइव AI सेवा जुड़ी नहीं है। वॉइस सुविधा जल्द आएगी।',
+    '.privacy-note': 'जवाब यहाँ दी गई जानकारी पर आधारित हैं। समर्थित ब्राउज़र में माइक बटन से आवाज़ में पूछें।',
     '.onboarding-strip strong': 'इसे अपने कारोबार के मुताबिक बनाएँ',
     '.onboarding-strip p': 'कुछ आसान सवालों से सुझाव बेहतर होंगे। आप कोई भी सवाल छोड़ सकते हैं।',
     '#startOnboarding': 'शुरू करें →',
@@ -629,7 +636,7 @@ function applyLanguage() {
     '.assistant-intro p:last-child': 'Type the way you’d ask a helpful friend. You don’t need special words.',
     '#askInput': 'Ask anything about your business…',
     '.send-button': 'Ask →',
-    '.privacy-note': 'Helpful starting replies use what you enter here; a live AI connection isn’t set up in this preview. Voice input is coming soon.',
+    '.privacy-note': 'Helpful starting replies use your information. Use the microphone button for voice input when your browser supports it.',
     '.onboarding-strip strong': 'Make this feel like your business',
     '.onboarding-strip p': 'A few easy questions can help us make your suggestions more useful. Skip any question you like.',
     '#startOnboarding': 'Get started →',
@@ -1004,6 +1011,160 @@ function formatSimpleAssistant(question) {
   return window.UdyamServices.answer(question, window.UdyamStore.current(), state.language, today());
 }
 
+function detectSpeechLanguage(text) {
+  const raw = (text || '').trim();
+  if (!raw) return state.language || 'en';
+  if (/[\u0900-\u097F]/.test(raw) || /\b(mera|mujhe|aaj|kal|kitna|kya|hai|hoga|se|ke|liye|dikhai|bikne|kamai|stock|offer|dukaan|samajh|kaisa)\b/i.test(raw)) {
+    return 'hi';
+  }
+  return 'en';
+}
+
+function getVoiceLocale(text = '') {
+  const raw = (text || '').trim();
+  if (!raw) return (state.language || 'en') === 'hi' ? 'hi-IN' : 'en-US';
+  if (/[\u0900-\u097F]/.test(raw) || /\b(mera|mujhe|aaj|kal|kitna|kya|hai|hoga|se|ke|liye|dikhai|bikne|kamai|stock|offer|dukaan|samajh|kaisa)\b/i.test(raw)) {
+    return 'hi-IN';
+  }
+  return 'en-US';
+}
+
+function setVoicePanelState(mode, message) {
+  const title = $('#voiceStatusTitle');
+  const status = $('#voiceStateLabel');
+  const mic = $('#voiceMicButton');
+  if (title) title.textContent = message || (mode === 'listening' ? 'Listening…' : mode === 'speaking' ? 'Speaking reply' : 'Ready to listen');
+  if (status) status.textContent = message || (mode === 'listening' ? 'Listening for your request' : mode === 'speaking' ? 'Speaking the answer aloud' : mode === 'processing' ? 'Processing your request' : 'Waiting for your request');
+  if (mic) {
+    mic.classList.toggle('is-listening', mode === 'listening');
+  }
+}
+
+function openVoicePanel() {
+  const panel = $('#voicePanel');
+  if (!panel) return;
+  panel.hidden = false;
+  const transcript = $('#voiceTranscript');
+  if (transcript && !transcript.value.trim()) transcript.value = $('#askInput').value.trim();
+}
+
+function closeVoicePanel() {
+  const panel = $('#voicePanel');
+  if (!panel) return;
+  panel.hidden = true;
+  if (voiceState.recognition) {
+    voiceState.recognition.stop();
+    voiceState.recognition = null;
+  }
+  voiceState.listening = false;
+  $('#voiceMicButton')?.classList.remove('is-listening');
+  setVoicePanelState('waiting', 'Waiting for your request');
+}
+
+function stopVoiceRecognition() {
+  if (voiceState.recognition) {
+    voiceState.recognition.stop();
+    voiceState.recognition = null;
+  }
+  voiceState.listening = false;
+  $('#voiceMicButton')?.classList.remove('is-listening');
+  setVoicePanelState('waiting', 'Ready to listen');
+}
+
+function startVoiceRecognition() {
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognitionCtor) {
+    $('#voiceTranscript').value = state.language === 'hi'
+      ? 'इस ब्राउज़र में वॉइस इनपुट उपलब्ध नहीं है। कृपया टाइप करके पूछें।'
+      : 'Voice input is not available in this browser. Please type your question instead.';
+    setVoicePanelState('waiting', 'Voice not supported');
+    showToast(state.language === 'hi' ? 'वॉइस इनपुट उपलब्ध नहीं है। टाइप करें।' : 'Voice input is unavailable. Please type your question instead.');
+    return;
+  }
+  if (voiceState.recognition) {
+    voiceState.recognition.stop();
+  }
+  const recognition = new SpeechRecognitionCtor();
+  voiceState.recognition = recognition;
+  recognition.lang = getVoiceLocale($('#voiceTranscript').value || $('#askInput').value || '');
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.onstart = () => {
+    voiceState.listening = true;
+    setVoicePanelState('listening', 'Listening…');
+    $('#voiceMicButton')?.classList.add('is-listening');
+  };
+  recognition.onresult = event => {
+    let transcript = '';
+    let finalText = '';
+    for (let index = 0; index < event.results.length; index += 1) {
+      const current = event.results[index];
+      const text = current[0].transcript.trim();
+      if (!text) continue;
+      if (current.isFinal) finalText += `${text} `;
+      else transcript += `${text} `;
+    }
+    const output = (finalText || transcript).trim();
+    if (output) $('#voiceTranscript').value = output;
+  };
+  recognition.onerror = event => {
+    const message = event.error === 'not-allowed'
+      ? (state.language === 'hi' ? 'माइक्रोफोन की अनुमति दीजिए।' : 'Microphone access was denied.')
+      : state.language === 'hi'
+        ? 'वॉइस पहचान में कोई समस्या आई। कृपया टाइप करें।'
+        : 'Voice recognition had a problem. Please type your question instead.';
+    setVoicePanelState('waiting', 'Voice error');
+    showToast(message);
+  };
+  recognition.onend = () => {
+    voiceState.listening = false;
+    $('#voiceMicButton')?.classList.remove('is-listening');
+    setVoicePanelState('waiting', 'Ready to listen');
+    voiceState.recognition = null;
+  };
+  try {
+    recognition.start();
+  } catch (error) {
+    voiceState.recognition = null;
+    voiceState.listening = false;
+    $('#voiceMicButton')?.classList.remove('is-listening');
+    setVoicePanelState('waiting', 'Could not start microphone');
+    showToast(state.language === 'hi'
+      ? 'माइक्रोफोन शुरू नहीं हो सका। अनुमति जाँचें या लिखकर पूछें।'
+      : 'Could not start the microphone. Check permission or type your question.');
+    console.error('Could not start browser speech recognition.', error);
+  }
+}
+
+function speakAssistantReply(text) {
+  if (!text || voiceState.muted || !('speechSynthesis' in window)) return;
+  if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+    window.speechSynthesis.cancel();
+  }
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = getVoiceLocale(text);
+  utterance.rate = 1;
+  utterance.pitch = 1;
+  utterance.volume = 1;
+  utterance.onend = () => {
+    if (!$('#voicePanel').hidden) setVoicePanelState('waiting', 'Ready to listen');
+  };
+  utterance.onerror = () => {
+    if (!$('#voicePanel').hidden) setVoicePanelState('waiting', 'Ready to listen');
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
+function buildSpokenResponse(result) {
+  if (!result) return '';
+  const content = [result.title, result.message, ...(result.evidence || []), ...(result.observed_data || []), ...(result.missing_information || [])]
+    .filter(Boolean)
+    .join('. ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return content.slice(0, 600);
+}
+
 function renderAssistantReply(result) {
   const reply = $('#assistantReply');
   reply.replaceChildren();
@@ -1053,6 +1214,21 @@ function renderAssistantReply(result) {
   }
   reply.append(card);
   reply.hidden = false;
+  const voiceReply = $('#voiceResponse');
+  if (voiceReply) {
+    voiceReply.replaceChildren();
+    const voiceTitle = document.createElement('h4');
+    voiceTitle.textContent = result.title || (state.language === 'hi' ? 'उद्यमAI का जवाब' : 'UdyamAI response');
+    const voiceMessage = document.createElement('p');
+    voiceMessage.textContent = result.message || '';
+    voiceReply.append(voiceTitle, voiceMessage);
+    voiceReply.hidden = false;
+  }
+  const spoken = buildSpokenResponse(result);
+  if (spoken) {
+    setVoicePanelState('speaking', 'Speaking reply');
+    speakAssistantReply(spoken);
+  }
 }
 
 function renderSquad(question) {
@@ -1487,19 +1663,63 @@ $('#askForm').addEventListener('submit', async event => {
   event.preventDefault();
   const question = $('#askInput').value.trim();
   if (!question) return;
+  if (!$('#voicePanel').hidden) setVoicePanelState('processing', state.language === 'hi' ? 'आपकी बात समझ रहा हूँ…' : 'Thinking through your request…');
   $('#assistantLoading').hidden = false;
   $('#askForm button[type="submit"]').disabled = true;
   $('#askInput').value = '';
   try {
     const result = window.UdyamAPI.connected()
-      ? await window.UdyamAPI.ask({ question, language: state.language })
+      ? await window.UdyamAPI.ask({ question, language: detectSpeechLanguage(question) === 'hi' ? 'hi' : 'en' })
       : await new Promise(resolve => window.setTimeout(() => resolve(formatSimpleAssistant(question)), 280));
     renderAssistantReply(result);
   } catch (error) {
     showToast(error.message);
+    if (!$('#voicePanel').hidden) setVoicePanelState('waiting', state.language === 'hi' ? 'फिर से कोशिश करें' : 'Please try again');
   } finally {
     $('#assistantLoading').hidden = true;
     $('#askForm button[type="submit"]').disabled = false;
+  }
+});
+$('#voiceInputButton').addEventListener('click', () => {
+  const panel = $('#voicePanel');
+  if (panel && panel.hidden) {
+    openVoicePanel();
+    return;
+  }
+  if (voiceState.listening) stopVoiceRecognition();
+  else startVoiceRecognition();
+});
+$('#floatingVoiceButton').addEventListener('click', () => {
+  openVoicePanel();
+  $('#voiceTranscript').value = $('#askInput').value.trim() || $('#voiceTranscript').value.trim();
+});
+$('#closeVoicePanel').addEventListener('click', closeVoicePanel);
+$('#voiceMicButton').addEventListener('click', () => {
+  if (voiceState.listening) stopVoiceRecognition();
+  else startVoiceRecognition();
+});
+$('#voiceUseText').addEventListener('click', () => {
+  closeVoicePanel();
+  $('#askInput').focus();
+});
+$('#voiceSend').addEventListener('click', () => {
+  const text = ($('#voiceTranscript').value || $('#askInput').value).trim();
+  if (!text) {
+    showToast(state.language === 'hi' ? 'कृपया कुछ लिखें या बोलें।' : 'Please type or speak a request first.');
+    return;
+  }
+  $('#askInput').value = text;
+  stopVoiceRecognition();
+  $('#askForm').requestSubmit();
+});
+$('#voiceMute').addEventListener('click', () => {
+  voiceState.muted = !voiceState.muted;
+  $('#voiceMute').textContent = voiceState.muted ? (state.language === 'hi' ? 'अनम्यूट' : 'Unmute') : (state.language === 'hi' ? 'म्यूट' : 'Mute');
+  if (voiceState.muted) {
+    window.speechSynthesis?.cancel?.();
+    setVoicePanelState('waiting', 'Listening muted');
+  } else {
+    setVoicePanelState('waiting', 'Ready to listen');
   }
 });
 $$ ('.question-chip').forEach(button => button.addEventListener('click', () => {

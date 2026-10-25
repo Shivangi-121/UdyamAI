@@ -158,10 +158,10 @@
               <form class="ask-form" id="askForm">
                 <label class="sr-only" for="askInput">Ask UdyamAI a question</label>
                 <input id="askInput" autocomplete="off" placeholder="Ask anything about your business…" required>
-                <button class="voice-button" type="button" aria-label="Voice input coming soon" title="Voice input coming soon" disabled aria-disabled="true">♩<span class="sr-only">Voice input coming soon</span></button>
+                <button class="voice-button" id="voiceInputButton" type="button" aria-label="Use voice input" title="Use voice input">🎙</button>
                 <button class="send-button" type="submit">Ask <span aria-hidden="true">→</span></button>
               </form>
-              <p class="privacy-note" id="assistantModeNote">Helpful starting replies use what you enter here; a live AI connection isn't set up in this preview. Voice input is coming soon.</p>
+              <p class="privacy-note" id="assistantModeNote">Helpful starting replies use what you enter here; a live AI connection isn't set up in this preview. Voice input is available when your browser supports it.</p>
               <div class="assistant-loading" id="assistantLoading" role="status" hidden><span></span>Thinking through your question…</div>
               <div class="assistant-reply" id="assistantReply" role="region" aria-live="polite" aria-label="UdyamAI response" hidden></div>
               <button class="outline-button squad-launch" id="squadButton" type="button">Ask the business team</button>
@@ -375,6 +375,30 @@
       <div class="dialog-actions"><button type="button" class="outline-button" data-close="inventoryDialog">Not now</button><button class="button-primary" type="submit">Save count</button></div>
     </form>
   </dialog>
+  <div class="voice-panel" id="voicePanel" hidden aria-live="polite">
+    <div class="voice-header">
+      <div>
+        <p class="eyebrow">VOICE ASSISTANT</p>
+        <h3 id="voiceStatusTitle">Ready to listen</h3>
+      </div>
+      <button class="icon-button voice-close" id="closeVoicePanel" type="button" aria-label="Close voice assistant">×</button>
+    </div>
+    <div class="voice-orb-wrap">
+      <button class="voice-orb" id="voiceMicButton" type="button" aria-label="Start listening">
+        <span class="voice-orb-core" aria-hidden="true">🎙</span>
+      </button>
+    </div>
+    <div class="voice-state" id="voiceStateLabel">Waiting for your request</div>
+    <label class="sr-only" for="voiceTranscript">Voice transcript</label>
+    <textarea id="voiceTranscript" rows="3" placeholder="Your spoken request will appear here."></textarea>
+    <div class="voice-response" id="voiceResponse" role="status" aria-live="polite" hidden></div>
+    <div class="voice-actions">
+      <button class="outline-button" id="voiceUseText" type="button">Use text</button>
+      <button class="button-primary" id="voiceSend" type="button">Send request</button>
+      <button class="outline-button" id="voiceMute" type="button">Mute</button>
+    </div>
+  </div>
+  <button type="button" class="floating-voice-button" id="floatingVoiceButton" aria-label="Open voice assistant">🎙</button>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
