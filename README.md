@@ -48,6 +48,7 @@ Backend configuration is loaded from environment variables or `backend\.env`. Se
 - `LLM_MODEL`
 - `AI_TIMEOUT_SECONDS`
 - `AI_REQUESTS_PER_MINUTE`
+- `INTELLIGENCE_CHANGE_THRESHOLD` — relative period change needed before recording a sales or expense alert (default `0.25`).
 
 Without both `LLM_API_KEY` and `LLM_MODEL`, the assistant and campaign generator explicitly report demo mode and use deterministic local responses. With configuration, the backend makes one bounded LLM call per assistant or campaign-generation request. Calculation results are produced by deterministic Python code, not the model.
 
@@ -74,10 +75,13 @@ Business endpoints are scoped to `/api/merchants/{merchant_id}` and require that
 - `GET/POST/DELETE /merchants/{id}/sales` and `/expenses` — append/list records and delete by ID; linked sale creation checks inventory and records cost of goods when known.
 - `POST /merchants/{id}/products/{product_id}/inventory`, `GET` same path — record and list inventory counts.
 - `GET /merchants/{id}/summary?on=YYYY-MM-DD` — recorded daily totals; gross profit is omitted when sale costs are incomplete, and recorded expenses are not treated as net profit.
+- `POST /merchants/{id}/intelligence/analyze`, `GET /insights`, `PATCH /insights/{insight_id}` — deterministic, merchant-scoped Business Pulse analysis, persisted/deduplicated findings, and read/save/dismiss state.
+- `GET /merchants/{id}/inventory-risks` — stock coverage and suggested replenishment only when recent sales, stock count, and supplier lead time support the estimate.
+- `GET/POST /merchants/{id}/outcomes`, `PATCH /outcomes/{outcome_id}` — record a selected recommendation, its baseline/assumptions, and later-entered outcomes with an explicit fair-comparison flag.
 - `POST /merchants/{id}/scenarios/calculate` — deterministic Business Twin simulation; `POST/GET/DELETE /scenarios` — save/list/delete simulations.
 - `POST /merchants/{id}/assistant`, `GET /recommendations` — one structured recommendation and its history.
 - `POST /merchants/{id}/campaigns/generate` — editable generated/mock copy; `GET/POST/PATCH/DELETE /campaigns` — draft lifecycle only.
-- `GET/POST /merchants/{id}/tasks`, `POST /tasks/plan`, `PATCH/DELETE /tasks/{task_id}`, `GET /tasks/history` — proposal, approval/rejection, checklist status, and action history. Approval never executes an external action.
+- `GET/POST /merchants/{id}/tasks`, `POST /tasks/plan`, `PATCH/DELETE /tasks/{task_id}`, `GET /tasks/history` — proposal, proposed-task edits, approval/rejection, checklist status, and action history. Approval never executes an external action.
 
 Errors use a consistent JSON envelope (`error` and `message`; validation errors also include safe field details). Swagger lists the request and response schemas.
 
@@ -88,6 +92,11 @@ Errors use a consistent JSON envelope (`error` and `message`; validation errors 
 - The current bearer-token map is a **development authorization foundation**, not a complete production identity system. Configure a unique random token per merchant. Do not use the bundled development tokens outside a local demo. Before deploying for real users, integrate a proper identity provider, secure tenant provisioning and token rotation, enforce HTTPS, and configure production CORS and rate limiting.
 - LLM provider calls, if configured, send the user's question and authorized merchant context from the backend. Never place LLM credentials in the frontend.
 - Demand is user-entered in Business Twin scenarios; it is not forecast from history. Gross profit excludes operating expenses and unsold stock remains inventory. No net-profit claim is made.
+- Business Pulse uses deterministic rules only: week-over-week sales need at least three recorded selling days in each comparison week; expense changes need multiple entries across multiple days in both weeks; inventory rates need at least three units sold over at least three days in the past 30 days and a known on-hand count. It compares recorded entries, which may be incomplete. Inventory replenishment quantities are shown only when supplier lead time is known; otherwise the UI labels stock coverage as uncertain and does not suggest a quantity.
+- Product margin alerts require recent sales across at least three days plus an entered unit cost. They use the current entered cost and recent recorded sale amounts; no monetary growth impact is guessed.
+- Insights are refreshed on demand from the dashboard; there is no scheduler, push notification, or WhatsApp integration. Repeated findings update their existing record rather than creating repeated alerts. Saved older findings are marked as earlier analysis and may no longer be current.
+- Intelligence does not use an LLM to calculate metrics. The configured threshold controls relative sales/expense changes; AI failures therefore cannot interrupt deterministic analysis. Outcome records support later observations but do not establish that a recommendation caused a change.
+- Long-term seasonality analysis and automated forecasting are not implemented. "Established" maturity reflects the amount and span of recorded sales history, not a promise of seasonal accuracy.
 - The demo agent coordinator produces structured evidence from the merchant's records; its role outputs are deterministic workflow results rather than separate LLM personas/calls.
 - Campaigns are saved drafts only. Tasks are checklists only. No supplier orders, messages, payments, or third-party business actions are executed.
 - In offline mode the frontend continues to use localStorage and its existing deterministic mock services. Backend connection is opt-in under Settings. Backend mutations update the server first, and local UI state only after success.
@@ -100,4 +109,4 @@ cd C:\Users\shiva\UdyamAI\backend
 python -m pytest -q
 ```
 
-The tests cover financial edge cases, validation, merchant-scoped authorization, inventory-aware sale creation, scenario persistence, demo fallback responses, campaign persistence, and task approval history.
+The tests cover financial edge cases, validation, merchant-scoped authorization, inventory-aware sale creation, scenario persistence, demo fallback responses, campaign persistence, task approval history, evidence sufficiency, trend deduplication/dismissal, inventory risk, and outcome tracking.

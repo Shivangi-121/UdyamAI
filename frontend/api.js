@@ -46,16 +46,18 @@ window.UdyamAPI = (() => {
       }
       if (!health.ok) throw new Error(`Backend health check failed (${health.status}).`);
       const status = await health.json();
-      const [merchant, products, sales, expenses, campaigns, tasks, scenarios] = await Promise.all([
+      const [merchant, products, sales, expenses, campaigns, tasks, scenarios, insights, outcomes] = await Promise.all([
         request(merchantPath()),
         request(merchantPath('/products')),
         request(merchantPath('/sales')),
         request(merchantPath('/expenses')),
         request(merchantPath('/campaigns')),
         request(merchantPath('/tasks')),
-        request(merchantPath('/scenarios'))
+        request(merchantPath('/scenarios')),
+        request(merchantPath('/insights')),
+        request(merchantPath('/outcomes'))
       ]);
-      return { status, merchant, products, sales, expenses, campaigns, tasks, scenarios };
+      return { status, merchant, products, sales, expenses, campaigns, tasks, scenarios, insights, outcomes };
     } catch (error) {
       connection = null;
       throw error;
@@ -79,6 +81,7 @@ window.UdyamAPI = (() => {
     connected,
     updateMerchant: payload => request(merchantPath(), patch(payload)),
     createProduct: payload => request(merchantPath('/products'), json(payload)),
+    recordInventory: (productId, payload) => request(merchantPath(`/products/${encodeURIComponent(productId)}/inventory`), json(payload)),
     createSale: payload => request(merchantPath('/sales'), json(payload)),
     createExpense: payload => request(merchantPath('/expenses'), json(payload)),
     calculateScenario: payload => request(merchantPath('/scenarios/calculate'), json(payload)),
@@ -87,8 +90,15 @@ window.UdyamAPI = (() => {
     saveCampaign: payload => request(merchantPath('/campaigns'), json(payload)),
     createTask: payload => request(merchantPath('/tasks'), json(payload)),
     createTaskPlan: payload => request(merchantPath('/tasks/plan'), json(payload)),
-    updateTask: (taskId, status) => request(merchantPath(`/tasks/${encodeURIComponent(taskId)}`), patch({ status })),
+    updateTask: (taskId, update) => request(
+      merchantPath(`/tasks/${encodeURIComponent(taskId)}`),
+      patch(typeof update === 'string' ? { status: update } : update)
+    ),
     deleteTask: taskId => request(merchantPath(`/tasks/${encodeURIComponent(taskId)}`), { method: 'DELETE' }),
+    analyzeBusiness: () => request(merchantPath('/intelligence/analyze'), { method: 'POST' }),
+    updateInsight: (insightId, status) => request(merchantPath(`/insights/${encodeURIComponent(insightId)}`), patch({ status })),
+    createOutcome: payload => request(merchantPath('/outcomes'), json(payload)),
+    updateOutcome: (outcomeId, payload) => request(merchantPath(`/outcomes/${encodeURIComponent(outcomeId)}`), patch(payload)),
     ask: payload => request(merchantPath('/assistant'), json(payload)),
     askTeam: payload => request(merchantPath('/assistant/team'), json(payload))
   };

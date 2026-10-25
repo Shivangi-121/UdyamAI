@@ -30,6 +30,7 @@ class ProductCreate(BaseModel):
     quantity: int | None = Field(default=None, ge=0)
     cost: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
     price: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    supplier_lead_time_days: int | None = Field(default=None, ge=0, le=365)
 
 
 class ProductUpdate(BaseModel):
@@ -38,6 +39,7 @@ class ProductUpdate(BaseModel):
     quantity: int | None = Field(default=None, ge=0)
     cost: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
     price: Decimal | None = Field(default=None, ge=0, max_digits=12, decimal_places=2)
+    supplier_lead_time_days: int | None = Field(default=None, ge=0, le=365)
 
 
 class ProductOut(ProductCreate, ORMModel):
@@ -211,6 +213,11 @@ class TaskStatus(BaseModel):
     status: Literal["proposed", "approved", "rejected", "in_progress", "completed"]
 
 
+class TaskUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=180)
+    status: Literal["proposed", "approved", "rejected", "in_progress", "completed"] | None = None
+
+
 class TaskOut(ORMModel):
     id: str
     merchant_id: str
@@ -239,3 +246,80 @@ class SummaryOut(BaseModel):
     sales_count: int
     expenses_count: int
     missing_information: list[str]
+
+
+class BusinessInsightOut(ORMModel):
+    id: str
+    merchant_id: str
+    kind: str
+    entity_id: str | None
+    priority: int
+    headline: str
+    observed: str
+    evidence: list[str]
+    comparison_period: str
+    why_it_matters: str
+    next_action: str
+    confidence: str
+    data_quality: str
+    status: str
+    is_active: bool
+    generated_at: datetime
+    evaluated_at: datetime
+
+
+class InsightStatus(BaseModel):
+    status: Literal["unread", "read", "saved", "dismissed"]
+
+
+class InventoryRisk(BaseModel):
+    product_id: str
+    product_name: str
+    available_stock: int | None
+    units_sold: int
+    sales_days: int
+    recent_daily_rate: Decimal | None
+    estimated_days_remaining: Decimal | None
+    supplier_lead_time_days: int | None
+    risk: Literal["unknown", "low", "watch", "high"]
+    suggested_replenishment: int | None
+    assumptions: list[str]
+
+
+class AnalysisResult(BaseModel):
+    generated_at: datetime
+    maturity: Literal["new", "emerging", "established"]
+    insights: list[BusinessInsightOut]
+    inventory_risks: list[InventoryRisk]
+    missing_information: list[str]
+    source: Literal["recorded_data", "demo_data"]
+
+
+class OutcomeCreate(BaseModel):
+    insight_id: str | None = None
+    recommendation: str = Field(min_length=2, max_length=250)
+    assumptions: list[str] = Field(default_factory=list, max_length=20)
+    selected_action: str = Field(min_length=2, max_length=500)
+    baseline: dict[str, str | int | Decimal | None] = Field(default_factory=dict)
+    observation_start: date
+
+
+class OutcomeUpdate(BaseModel):
+    observation_end: date
+    actual_outcome: dict[str, str | int | Decimal | None]
+    fairly_comparable: bool
+
+
+class OutcomeOut(ORMModel):
+    id: str
+    merchant_id: str
+    insight_id: str | None
+    recommendation: str
+    assumptions: list[str]
+    selected_action: str
+    baseline: dict[str, str | int | Decimal | None]
+    observation_start: date
+    observation_end: date | None
+    actual_outcome: dict[str, str | int | Decimal | None] | None
+    fairly_comparable: bool | None
+    created_at: datetime

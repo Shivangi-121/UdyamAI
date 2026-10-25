@@ -6,6 +6,11 @@ let pendingPlan = [];
 let scenarioMerchantId = '';
 let backendAiMode = 'demo';
 let campaignDraftSource = 'demo';
+let businessInsights = [];
+let inventoryRisks = [];
+let trackedOutcomes = [];
+let insightLoading = false;
+let insightError = '';
 
 function saveState() {
   if (window.UdyamAPI.connected()) window.UdyamStore.savePreferences();
@@ -19,7 +24,8 @@ function applyBackendRecords(records, merchantId) {
     category: product.category || '',
     quantity: product.quantity,
     cost: product.cost === null ? null : Number(product.cost),
-    price: product.price === null ? null : Number(product.price)
+    price: product.price === null ? null : Number(product.price),
+    supplierLeadTimeDays: product.supplier_lead_time_days
   }));
   const productNames = new Map(products.map(product => [product.id, product.name]));
   const sales = records.sales.map(sale => ({
@@ -93,6 +99,9 @@ function applyBackendRecords(records, merchantId) {
     status: task.status
   }));
   state.scenarios = scenarios;
+  businessInsights = records.insights || [];
+  inventoryRisks = [];
+  trackedOutcomes = records.outcomes || [];
   saveState();
   render();
 }
@@ -114,6 +123,262 @@ function showToast(message) {
   toast.classList.add('show');
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => toast.classList.remove('show'), 2800);
+}
+
+function renderBusinessPulse() {
+  const status = $('#pulseStatus');
+  const missing = $('#pulseMissing');
+  const list = $('#pulseList');
+  const refresh = $('#refreshPulse');
+  list.replaceChildren();
+  missing.replaceChildren();
+  missing.hidden = true;
+  refresh.disabled = insightLoading || !window.UdyamAPI.connected();
+  refresh.textContent = insightLoading ? 'Checking your records…' : 'Check for updates';
+  if (!window.UdyamAPI.connected()) {
+    status.textContent = 'Connect your business records in Settings to check for personalized changes and stock risks.';
+    return;
+  }
+  if (insightError) {
+    status.textContent = `Could not check your records: ${insightError}`;
+    return;
+  }
+  if (insightLoading) {
+    status.textContent = 'Checking recent sales, expenses and stock records…';
+    return;
+  }
+  const visible = businessInsights
+    .filter(item => item.status !== 'dismissed')
+    .slice(0, state.mode === 'simple' ? 2 : state.mode === 'smart' ? 3 : 5);
+  const unread = businessInsights.filter(item => item.status === 'unread').length;
+  status.textContent = visible.length
+    ? `${unread} new insight${unread === 1 ? '' : 's'} · based on ${state.sample ? 'illustrative demo records' : 'your recorded data'}`
+    : state.sample
+      ? 'No supported changes found in this sample. Example data is illustrative, not a forecast.'
+      : 'No supported changes yet. Record sales on different days and add stock counts to unlock evidence-based insights.';
+  if (businessInsights.some(item => item.evaluated_at && Date.now() - new Date(item.evaluated_at).getTime() > 86400000)) {
+    const stale = document.createElement('p');
+    stale.textContent = 'Some saved insights have not been checked in over a day. Select “Check for updates” to re-evaluate current records.';
+    missing.append(stale);
+    missing.hidden = false;
+  }
+  visible.forEach(insight => {
+    const card = document.createElement('article');
+    card.className = `pulse-card priority-${insight.priority >= 80 ? 'high' : 'normal'}`;
+    const header = document.createElement('div');
+    header.className = 'pulse-card-heading';
+    const title = document.createElement('h3');
+    title.textContent = insight.headline;
+    const badge = document.createElement('span');
+    badge.className = 'pulse-confidence';
+    badge.textContent = `${insight.confidence} confidence · ${insight.data_quality} data`;
+    header.append(title, badge);
+    const observed = document.createElement('p');
+    observed.textContent = insight.observed;
+    const evidence = document.createElement('ul');
+    insight.evidence.forEach(entry => {
+      const item = document.createElement('li');
+      item.textContent = entry;
+      evidence.append(item);
+    });
+    const period = document.createElement('small');
+    period.className = 'pulse-period';
+    period.textContent = `Comparison: ${insight.comparison_period}`;
+    const reason = document.createElement('p');
+    reason.className = 'pulse-reason';
+    reason.textContent = insight.why_it_matters;
+    const nextAction = document.createElement('p');
+    nextAction.className = 'pulse-next-action';
+    nextAction.textContent = `Next: ${insight.next_action}`;
+    const freshness = document.createElement('small');
+    freshness.className = 'pulse-period';
+    freshness.textContent = insight.is_active
+      ? 'Current on the latest analysis.'
+      : 'Saved from an earlier analysis; check current records before acting.';
+    const actions = document.createElement('div');
+    actions.className = 'pulse-actions';
+    if (['inventory_risk', 'low_margin'].includes(insight.kind)) {
+      const investigate = document.createElement('button');
+      investigate.type = 'button';
+      investigate.className = 'outline-button';
+      investigate.textContent = 'Compare in Business Twin';
+      investigate.addEventListener('click', () => investigateInsight(insight));
+      actions.append(investigate);
+    }
+    if (!state.sample) {
+      const track = document.createElement('button');
+      track.type = 'button';
+      track.className = 'outline-button';
+      track.textContent = 'Track this action';
+      track.addEventListener('click', () => trackInsight(insight));
+      actions.append(track);
+      const plan = document.createElement('button');
+      plan.type = 'button';
+      plan.className = 'outline-button';
+      plan.textContent = 'Add next step to my plan';
+      plan.addEventListener('click', () => addInsightTask(insight));
+      actions.append(plan);
+      const save = document.createElement('button');
+      save.type = 'button';
+      save.className = 'text-button';
+      save.textContent = insight.status === 'saved' ? 'Saved' : 'Save';
+      save.disabled = insight.status === 'saved';
+      save.addEventListener('click', () => changeInsightStatus(insight, 'saved'));
+      actions.append(save);
+      if (insight.status === 'unread') {
+        const markRead = document.createElement('button');
+        markRead.type = 'button';
+        markRead.className = 'text-button';
+        markRead.textContent = 'Mark as read';
+        markRead.addEventListener('click', () => changeInsightStatus(insight, 'read'));
+        actions.append(markRead);
+      }
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'text-button';
+      dismiss.textContent = 'Dismiss';
+      dismiss.addEventListener('click', () => changeInsightStatus(insight, 'dismissed'));
+      actions.append(dismiss);
+    }
+    card.append(header, observed, evidence, period, reason, nextAction, freshness, actions);
+    list.append(card);
+  });
+  const notes = businessInsights.flatMap(item => item.evidence || []).filter(item => /needed|missing|not recorded/i.test(item));
+  if (notes.length) {
+    const title = document.createElement('strong');
+    title.textContent = 'What would make this clearer';
+    const listNotes = document.createElement('ul');
+    [...new Set(notes)].slice(0, 3).forEach(text => {
+      const item = document.createElement('li');
+      item.textContent = text;
+      listNotes.append(item);
+    });
+    missing.append(title, listNotes);
+    missing.hidden = false;
+  }
+}
+
+function renderTrackedOutcomes() {
+  const container = $('#outcomeList');
+  container.replaceChildren();
+  const pending = trackedOutcomes.filter(item => !item.observation_end);
+  $('#outcomeFollowups').hidden = !window.UdyamAPI.connected() || pending.length === 0;
+  pending.forEach(outcome => {
+    const card = document.createElement('article');
+    card.className = 'outcome-row';
+    const text = document.createElement('span');
+    text.textContent = `${outcome.recommendation} · tracking since ${outcome.observation_start}`;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'outline-button';
+    button.textContent = 'Record what happened';
+    button.addEventListener('click', () => {
+      $('#outcomeId').value = outcome.id;
+      $('#outcomeDate').value = today();
+      $('#outcomeNotes').value = '';
+      $('#outcomeComparable').checked = false;
+      $('#outcomeError').hidden = true;
+      openDialog('outcomeDialog');
+    });
+    card.append(text, button);
+    container.append(card);
+  });
+}
+
+async function refreshBusinessPulse() {
+  if (!window.UdyamAPI.connected()) {
+    showToast('Connect a merchant backend in Settings before checking business records.');
+    return;
+  }
+  insightLoading = true;
+  insightError = '';
+  renderBusinessPulse();
+  try {
+    const result = await window.UdyamAPI.analyzeBusiness();
+    businessInsights = result.insights || [];
+    inventoryRisks = result.inventory_risks || [];
+    render();
+  } catch (error) {
+    insightError = error.message;
+  } finally {
+    insightLoading = false;
+    renderBusinessPulse();
+  }
+}
+
+async function changeInsightStatus(insight, status) {
+  try {
+    const updated = await window.UdyamAPI.updateInsight(insight.id, status);
+    businessInsights = businessInsights.map(item => item.id === insight.id ? updated : item);
+    renderBusinessPulse();
+    showToast(status === 'dismissed' ? 'Insight dismissed.' : status === 'read' ? 'Insight marked as read.' : 'Insight saved for later.');
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function trackInsight(insight) {
+  try {
+    const outcome = await window.UdyamAPI.createOutcome({
+      insight_id: insight.id,
+      recommendation: insight.headline,
+      assumptions: insight.evidence,
+      selected_action: insight.next_action,
+      baseline: { observed: insight.observed, comparison_period: insight.comparison_period },
+      observation_start: today()
+    });
+    trackedOutcomes.unshift(outcome);
+    renderTrackedOutcomes();
+    showToast('Action tracking started. Add the outcome later to compare fairly.');
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function addInsightTask(insight) {
+  try {
+    const created = await window.UdyamAPI.createTask({
+      title: insight.next_action.slice(0, 180),
+      goal: insight.headline
+    });
+    state.tasks.unshift({
+      id: created.id,
+      title: created.title,
+      goal: created.goal,
+      requiresApproval: created.requires_approval,
+      approved: false,
+      completed: false,
+      status: created.status
+    });
+    render();
+    showToast('A proposed next step was added to your action plan. Review it before acting.');
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+function investigateInsight(insight) {
+  const productId = insight.entity_id;
+  const risk = inventoryRisks.find(item => item.product_id === productId);
+  const product = state.products.find(item => item.id === productId);
+  if (!product || (insight.kind === 'inventory_risk' && !risk)) {
+    showToast('Refresh the Business Pulse to load current product details first.');
+    return;
+  }
+  $('#twinProduct').value = productId;
+  if (product) {
+    if (product.quantity !== null) $('#twinInventory').value = product.quantity;
+    if (Number.isFinite(product.cost)) $('#twinCost').value = product.cost;
+    if (Number.isFinite(product.price)) $('#twinPrice').value = product.price;
+  }
+  if (risk?.recent_daily_rate !== null && risk?.recent_daily_rate !== undefined) $('#twinDemand').value = Math.ceil(Number(risk.recent_daily_rate));
+  if (risk?.supplier_lead_time_days !== null && risk?.supplier_lead_time_days !== undefined) $('#twinPeriod').value = Math.max(1, risk.supplier_lead_time_days);
+  if (risk?.suggested_replenishment !== null && risk?.suggested_replenishment !== undefined) $('#twinQuantity').value = risk.suggested_replenishment;
+  updateTwin();
+  showPage('twin');
+  showToast(insight.kind === 'low_margin'
+    ? 'Adjust price or discount to compare. Enter your own demand assumption; no forecast is inferred.'
+    : 'Review the historical sales rate and assumptions before comparing.');
 }
 
 function render() {
@@ -181,6 +446,8 @@ function render() {
   $('#suggestionTitle').textContent = state.products.length ? `Check stock for ${state.products[0].name}` : 'Tell us a little about your shop';
   $('#suggestionSub').textContent = state.products.length ? 'A quick stock count can help with tomorrow’s plans.' : 'It helps UdyamAI give more useful suggestions.';
   renderBusinessMetrics();
+  renderBusinessPulse();
+  renderTrackedOutcomes();
   renderRecordedInsights();
   renderTransactions();
   renderSaleOptions();
@@ -495,7 +762,7 @@ function renderProducts() {
     const name = document.createElement('strong');
     name.textContent = product.name;
     const quantity = document.createElement('small');
-    quantity.textContent = product.quantity === null ? 'Quantity not added' : `${product.quantity} in stock`;
+    quantity.textContent = `${product.quantity === null ? 'Quantity not added' : `${product.quantity} in stock`}${product.supplierLeadTimeDays === null || product.supplierLeadTimeDays === undefined ? '' : ` · delivery ${product.supplierLeadTimeDays} days`}`;
     info.append(name, quantity);
     if (state.mode !== 'simple') {
       const details = document.createElement('small');
@@ -506,6 +773,19 @@ function renderProducts() {
       info.append(details);
     }
     row.append(info);
+    const countButton = document.createElement('button');
+    countButton.type = 'button';
+    countButton.className = 'outline-button';
+    countButton.textContent = 'Update count';
+    countButton.setAttribute('aria-label', `Update ${product.name} stock count`);
+    countButton.addEventListener('click', () => {
+      $('#inventoryProductId').value = product.id;
+      $('#inventoryQuantity').value = product.quantity ?? '';
+      $('#inventoryNote').value = '';
+      $('#inventoryError').hidden = true;
+      openDialog('inventoryDialog');
+    });
+    row.append(countButton);
     list.append(row);
   });
 }
@@ -601,6 +881,15 @@ function renderTasks() {
       ? 'Checklist only · separate approval required before any purchase or message'
       : task.approved ? 'Checklist approved · no external action taken' : 'Your checklist';
     details.append(title, status);
+    if (!state.sample && !task.completed && !task.approved && (task.status === undefined || task.status === 'proposed')) {
+      const edit = document.createElement('button');
+      edit.className = 'text-button task-edit';
+      edit.type = 'button';
+      edit.textContent = 'Edit';
+      edit.setAttribute('aria-label', `Edit ${task.title}`);
+      edit.addEventListener('click', () => editProposedTask(task, details, title, edit));
+      details.append(edit);
+    }
     const reject = document.createElement('button');
     reject.className = 'text-button task-remove';
     reject.type = 'button';
@@ -620,6 +909,51 @@ function renderTasks() {
     });
     row.append(checkbox, details, reject);
     taskList.append(row);
+  });
+}
+
+function editProposedTask(task, details, title, editButton) {
+  const form = document.createElement('form');
+  form.className = 'task-edit-form';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.maxLength = 180;
+  input.value = task.title;
+  input.setAttribute('aria-label', 'Edit proposed checklist item');
+  const save = document.createElement('button');
+  save.type = 'submit';
+  save.className = 'outline-button';
+  save.textContent = 'Save';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'text-button';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => {
+    form.replaceWith(title);
+    editButton.hidden = false;
+  });
+  form.append(input, save, cancel);
+  title.replaceWith(form);
+  editButton.hidden = true;
+  input.focus();
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const nextTitle = input.value.trim();
+    if (nextTitle.length < 2) {
+      showToast('Use a task title with at least 2 characters.');
+      input.focus();
+      return;
+    }
+    try {
+      if (window.UdyamAPI.connected()) {
+        await window.UdyamAPI.updateTask(task.id, { title: nextTitle });
+      }
+      task.title = nextTitle;
+      saveState();
+      renderTasks();
+    } catch (error) {
+      showToast(error.message);
+    }
   });
 }
 
@@ -864,10 +1198,76 @@ $('#connectBackend').addEventListener('click', async () => {
 
 $('#disconnectBackend').addEventListener('click', () => {
   window.UdyamAPI.disconnect();
+  businessInsights = [];
+  inventoryRisks = [];
+  trackedOutcomes = [];
+  insightError = '';
   state = window.UdyamStore.load();
   render();
   $('#backendStatus').textContent = 'Disconnected. Your original local records are unchanged.';
   showToast('Backend disconnected.');
+});
+
+$('#refreshPulse').addEventListener('click', refreshBusinessPulse);
+
+$('#inventoryForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const productId = $('#inventoryProductId').value;
+  const quantity = Number($('#inventoryQuantity').value);
+  if (!Number.isInteger(quantity) || quantity < 0) {
+    $('#inventoryError').textContent = 'Enter a whole number of items, including zero if none are left.';
+    $('#inventoryError').hidden = false;
+    return;
+  }
+  const product = state.products.find(item => item.id === productId);
+  if (!product) {
+    $('#inventoryError').textContent = 'This product could not be found. Refresh your records and try again.';
+    $('#inventoryError').hidden = false;
+    return;
+  }
+  if (window.UdyamAPI.connected()) {
+    try {
+      await window.UdyamAPI.recordInventory(productId, {
+        quantity,
+        note: $('#inventoryNote').value.trim()
+      });
+    } catch (error) {
+      $('#inventoryError').textContent = error.message;
+      $('#inventoryError').hidden = false;
+      return;
+    }
+  }
+  product.quantity = quantity;
+  saveState();
+  closeDialog('inventoryDialog');
+  render();
+  showToast('Stock count saved.');
+});
+
+$('#outcomeForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const outcomeId = $('#outcomeId').value;
+  const notes = $('#outcomeNotes').value.trim();
+  const observationEnd = $('#outcomeDate').value;
+  if (!outcomeId || !notes || !observationEnd) {
+    $('#outcomeError').textContent = 'Enter what you observed and choose an end date.';
+    $('#outcomeError').hidden = false;
+    return;
+  }
+  try {
+    const updated = await window.UdyamAPI.updateOutcome(outcomeId, {
+      observation_end: observationEnd,
+      actual_outcome: { notes },
+      fairly_comparable: $('#outcomeComparable').checked
+    });
+    trackedOutcomes = trackedOutcomes.map(item => item.id === updated.id ? updated : item);
+    closeDialog('outcomeDialog');
+    renderTrackedOutcomes();
+    showToast('Observation saved. The comparison does not imply the action caused the result.');
+  } catch (error) {
+    $('#outcomeError').textContent = error.message;
+    $('#outcomeError').hidden = false;
+  }
 });
 
 $('#recordSaleButton').addEventListener('click', () => openDialog('saleDialog'));
@@ -1030,12 +1430,14 @@ $('#productForm').addEventListener('submit', async event => {
   const rawQuantity = $('#productQuantity').value;
   const rawCost = $('#productCost').value;
   const rawPrice = $('#productPrice').value;
+  const rawLeadTime = $('#productLeadTime').value;
   const productInput = {
     name,
     category: null,
     quantity: rawQuantity === '' ? null : Math.max(0, Number(rawQuantity)),
     cost: rawCost === '' ? null : Math.max(0, Number(rawCost)),
-    price: rawPrice === '' ? null : Math.max(0, Number(rawPrice))
+    price: rawPrice === '' ? null : Math.max(0, Number(rawPrice)),
+    supplier_lead_time_days: rawLeadTime === '' ? null : Math.max(0, Number(rawLeadTime))
   };
   let serverProduct = null;
   if (window.UdyamAPI.connected()) {
@@ -1046,7 +1448,11 @@ $('#productForm').addEventListener('submit', async event => {
       return;
     }
   }
-  state.products.push({ id: serverProduct?.id || `product-${Date.now()}`, ...productInput });
+  state.products.push({
+    id: serverProduct?.id || `product-${Date.now()}`,
+    ...productInput,
+    supplierLeadTimeDays: productInput.supplier_lead_time_days
+  });
   $('#productSearch').value = '';
   saveState();
   event.target.reset();

@@ -124,6 +124,20 @@
                 <article class="money-card task-reminder" id="taskReminder" hidden><span class="money-icon note" aria-hidden="true">✓</span><span class="money-label">One thing to do next</span><strong id="reminderTitle"></strong><button type="button" class="text-button" id="openTasks">View my action plan →</button></article>
               </div>
             </section>
+            <section class="business-pulse" id="businessPulse" aria-labelledby="pulseTitle">
+              <div class="section-heading">
+                <div><p class="eyebrow">BASED ON YOUR RECORDED BUSINESS DATA</p><h2 id="pulseTitle">Your Business Pulse</h2></div>
+                <button type="button" class="outline-button" id="refreshPulse">Check for updates</button>
+              </div>
+              <p class="pulse-status" id="pulseStatus" role="status">Connect your business records in Settings to check for personalized changes and stock risks.</p>
+              <div class="pulse-missing" id="pulseMissing" hidden></div>
+              <div class="pulse-list" id="pulseList"></div>
+              <section class="outcome-followups" id="outcomeFollowups" hidden aria-labelledby="outcomesTitle">
+                <h3 id="outcomesTitle">Actions you’re tracking</h3>
+                <div class="outcome-list" id="outcomeList"></div>
+                <p class="pulse-period">An outcome after an action does not prove the action caused the change. Compare only when records and conditions are reasonably similar.</p>
+              </section>
+            </section>
             <section class="history-panel" id="historyPanel" aria-labelledby="historyTitle" hidden>
               <div class="section-heading"><div><p class="eyebrow">YOUR RECENT RECORDS</p><h2 id="historyTitle">Sales and spending</h2></div><button class="text-button" id="allTransactionsButton">View all</button></div>
               <div id="transactionList" class="transaction-list"></div>
@@ -333,8 +347,32 @@
       <p class="eyebrow">ADD ONE THING AT A TIME</p><h2>Add a product</h2><p class="dialog-copy">A name is enough to begin. You can add details later.</p>
       <label id="productNameLabel" for="productName">What do you sell?</label><input id="productName" type="text" maxlength="60" placeholder="e.g. Rice" required>
       <label id="productQuantityLabel" for="productQuantity">How many do you have? <span class="optional-label">Optional</span></label><input id="productQuantity" type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 12">
-      <div class="advanced-product-fields" id="advancedProductFields" hidden><p>Optional details for product margins</p><label for="productCost">Cost per item · ₹</label><input id="productCost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Your cost"><label for="productPrice">Selling price · ₹</label><input id="productPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Your price"></div>
+      <div class="advanced-product-fields" id="advancedProductFields" hidden><p>Optional details for product margins and stock timing</p><label for="productCost">Cost per item · ₹</label><input id="productCost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Your cost"><label for="productPrice">Selling price · ₹</label><input id="productPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Your price"><label for="productLeadTime">Supplier delivery time · days</label><input id="productLeadTime" type="number" min="0" max="365" step="1" inputmode="numeric" placeholder="If you know it"></div>
       <div class="dialog-actions"><button type="button" class="outline-button" data-close="productDialog">Not now</button><button class="button-primary" id="productSubmit" type="submit">Save product</button></div>
+    </form>
+  </dialog>
+  <dialog id="outcomeDialog" class="app-dialog">
+    <form id="outcomeForm" class="dialog-card">
+      <button type="button" class="dialog-close" data-close="outcomeDialog" aria-label="Close">×</button>
+      <p class="eyebrow">LEARN FROM WHAT HAPPENED</p><h2>Record an outcome</h2>
+      <p class="dialog-copy">Write what you observed after trying the next step. A change afterward does not prove the recommendation caused it.</p>
+      <input id="outcomeId" type="hidden">
+      <label for="outcomeDate">Observation end date</label><input id="outcomeDate" type="date" required>
+      <label for="outcomeNotes">What did you observe?</label><textarea id="outcomeNotes" rows="4" maxlength="1000" required placeholder="For example, recorded sales during that week…"></textarea>
+      <label class="outcome-comparable"><input id="outcomeComparable" type="checkbox"> Records and conditions are similar enough for a fair comparison</label>
+      <p class="form-error" id="outcomeError" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="outline-button" data-close="outcomeDialog">Not now</button><button class="button-primary" type="submit">Save observation</button></div>
+    </form>
+  </dialog>
+  <dialog id="inventoryDialog" class="app-dialog">
+    <form id="inventoryForm" class="dialog-card">
+      <button type="button" class="dialog-close" data-close="inventoryDialog" aria-label="Close">×</button>
+      <p class="eyebrow">A QUICK STOCK CHECK</p><h2>Update stock count</h2>
+      <input id="inventoryProductId" type="hidden">
+      <label for="inventoryQuantity">How many are on hand?</label><input id="inventoryQuantity" type="number" min="0" step="1" inputmode="numeric" required>
+      <label for="inventoryNote">Optional note</label><input id="inventoryNote" type="text" maxlength="250" placeholder="For example, counted this morning">
+      <p class="form-error" id="inventoryError" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="outline-button" data-close="inventoryDialog">Not now</button><button class="button-primary" type="submit">Save count</button></div>
     </form>
   </dialog>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

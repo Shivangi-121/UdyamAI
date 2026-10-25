@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     llm_model: str = ""
     ai_timeout_seconds: float = Field(default=15, gt=0, le=60)
     ai_requests_per_minute: int = Field(default=20, gt=0, le=600)
+    intelligence_change_threshold: float = Field(default=0.25, gt=0, le=1)
     max_request_bytes: int = Field(default=65_536, gt=0, le=1_048_576)
 
     @model_validator(mode="after")

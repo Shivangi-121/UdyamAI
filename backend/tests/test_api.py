@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 import json
 
 
@@ -99,6 +99,13 @@ def test_campaign_and_task_lifecycle_are_persistent_and_audited(client, auth):
 
     task = client.post("/api/merchants/personal/tasks", json={"title": "Count stock"}, headers=auth)
     task_id = task.json()["id"]
+    edited = client.patch(
+        f"/api/merchants/personal/tasks/{task_id}",
+        json={"title": "Count and verify stock"},
+        headers=auth,
+    )
+    assert edited.status_code == 200
+    assert edited.json()["title"] == "Count and verify stock"
     approved = client.patch(f"/api/merchants/personal/tasks/{task_id}", json={"status": "approved"}, headers=auth)
     assert approved.json()["status"] == "approved"
     assert client.get("/api/merchants/personal/tasks/history", headers=auth).json()[0]["action"] == "approved"
@@ -150,3 +157,147 @@ def test_invalid_input_uses_standard_error_shape(client, auth):
     )
     assert response.status_code == 422
     assert response.json()["error"] == "validation_error"
+
+
+def test_new_merchant_gets_no_fabricated_trends(client, auth):
+    result = client.post("/api/merchants/personal/intelligence/analyze", headers=auth)
+    assert result.status_code == 200
+    body = result.json()
+    assert body["maturity"] == "new"
+    assert body["insights"] == []
+    assert body["inventory_risks"][0]["risk"] == "unknown"
+    assert body["missing_information"]
+
+
+def test_sales_trend_is_evidence_based_deduplicated_and_dismissible(client, auth):
+    today = date.today()
+    for days_ago, amount in [(0, 100), (2, 100), (4, 100), (7, 50), (9, 50), (11, 50)]:
+        response = client.post(
+            "/api/merchants/personal/sales",
+            headers=auth,
+            json={"amount": str(amount), "date": (today - timedelta(days=days_ago)).isoformat()},
+        )
+        assert response.status_code == 201
+
+    path = "/api/merchants/personal/intelligence/analyze"
+    first = client.post(path, headers=auth).json()
+    second = client.post(path, headers=auth).json()
+    trends = [item for item in first["insights"] if item["kind"] == "sales_trend"]
+    assert len(trends) == 1
+    assert "increased" in trends[0]["headline"]
+    assert len([item for item in second["insights"] if item["kind"] == "sales_trend"]) == 1
+    assert len(client.get("/api/merchants/personal/insights", headers=auth).json()) == 1
+
+    saved = client.patch(
+        f"/api/merchants/personal/insights/{trends[0]['id']}",
+        headers=auth,
+        json={"status": "saved"},
+    )
+    assert saved.status_code == 200
+    rechecked = client.post(path, headers=auth).json()
+    assert any(item["id"] == trends[0]["id"] and item["status"] == "saved" for item in rechecked["insights"])
+
+    dismissed = client.patch(
+        f"/api/merchants/personal/insights/{trends[0]['id']}",
+        headers=auth,
+        json={"status": "dismissed"},
+    )
+    assert dismissed.status_code == 200
+    assert client.get("/api/merchants/personal/insights", headers=auth).json() == []
+
+
+def test_stock_risk_requires_sales_and_stock_and_estimates_replenishment(client, auth):
+    today = date.today()
+    product_path = "/api/merchants/personal/products/rice"
+    assert client.patch(product_path, headers=auth, json={"supplier_lead_time_days": 3}).status_code == 200
+    assert client.post(
+        "/api/merchants/personal/products/rice/inventory",
+        headers=auth,
+        json={"quantity": 100},
+    ).status_code == 201
+    for days_ago in (5, 4, 3):
+        created = client.post(
+            "/api/merchants/personal/sales",
+            headers=auth,
+            json={
+                "product_id": "rice",
+                "amount": "100",
+                "quantity": 10,
+                "date": (today - timedelta(days=days_ago)).isoformat(),
+            },
+        )
+        assert created.status_code == 201
+    client.post(
+        "/api/merchants/personal/products/rice/inventory",
+        headers=auth,
+        json={"quantity": 2},
+    )
+    risks = client.get("/api/merchants/personal/inventory-risks", headers=auth)
+    rice = risks.json()[0]
+    assert rice["risk"] == "high"
+    assert rice["estimated_days_remaining"] == "2.00"
+    assert rice["suggested_replenishment"] == 4
+
+    analysis = client.post("/api/merchants/personal/intelligence/analyze", headers=auth).json()
+    stock_alerts = [item for item in analysis["insights"] if item["kind"] == "inventory_risk"]
+    assert len(stock_alerts) == 1
+    assert stock_alerts[0]["entity_id"] == "rice"
+
+
+def test_low_margin_insight_uses_only_recorded_units_and_entered_cost(client, auth):
+    today = date.today()
+    client.post(
+        "/api/merchants/personal/products/rice/inventory",
+        headers=auth,
+        json={"quantity": 100},
+    )
+    for days_ago in (5, 4, 3):
+        response = client.post(
+            "/api/merchants/personal/sales",
+            headers=auth,
+            json={
+                "product_id": "rice",
+                "amount": "51",
+                "quantity": 10,
+                "date": (today - timedelta(days=days_ago)).isoformat(),
+            },
+        )
+        assert response.status_code == 201
+    analysis = client.post("/api/merchants/personal/intelligence/analyze", headers=auth).json()
+    margins = [item for item in analysis["insights"] if item["kind"] == "low_margin"]
+    assert len(margins) == 1
+    assert margins[0]["entity_id"] == "rice"
+    assert "2.0%" in margins[0]["observed"]
+    assert "net profit" in margins[0]["why_it_matters"]
+
+
+def test_recommendation_outcome_can_be_recorded_without_claiming_causation(client, auth):
+    analyzed = client.post("/api/merchants/personal/intelligence/analyze", headers=auth).json()
+    insight_id = None
+    if analyzed["insights"]:
+        insight_id = analyzed["insights"][0]["id"]
+    created = client.post(
+        "/api/merchants/personal/outcomes",
+        headers=auth,
+        json={
+            "insight_id": insight_id,
+            "recommendation": "Review sales",
+            "assumptions": ["Recorded entries are complete"],
+            "selected_action": "Check the notebook",
+            "baseline": {"recorded_sales": 100},
+            "observation_start": date.today().isoformat(),
+        },
+    )
+    assert created.status_code == 201
+    updated = client.patch(
+        f"/api/merchants/personal/outcomes/{created.json()['id']}",
+        headers=auth,
+        json={
+            "observation_end": date.today().isoformat(),
+            "actual_outcome": {"recorded_sales": 120},
+            "fairly_comparable": False,
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["fairly_comparable"] is False
+    assert client.get("/api/merchants/personal/outcomes", headers=auth).json()[0]["actual_outcome"]["recorded_sales"] == 120

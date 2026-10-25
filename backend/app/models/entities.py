@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -32,6 +32,7 @@ class Product(Base):
     quantity: Mapped[int | None] = mapped_column(Integer)
     cost: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    supplier_lead_time_days: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     merchant: Mapped[Merchant] = relationship(back_populates="products")
 
@@ -95,6 +96,47 @@ class AIRecommendation(Base):
     message: Mapped[str] = mapped_column(Text)
     evidence: Mapped[str] = mapped_column(Text, default="[]")
     source: Mapped[str] = mapped_column(String(20), default="demo")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class BusinessInsight(Base):
+    __tablename__ = "business_insights"
+    __table_args__ = (UniqueConstraint("merchant_id", "fingerprint", name="uq_insight_merchant_fingerprint"),)
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"), index=True)
+    fingerprint: Mapped[str] = mapped_column(String(180))
+    kind: Mapped[str] = mapped_column(String(60))
+    entity_id: Mapped[str | None] = mapped_column(String(80))
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    headline: Mapped[str] = mapped_column(String(180))
+    observed: Mapped[str] = mapped_column(Text)
+    evidence: Mapped[str] = mapped_column(Text, default="[]")
+    comparison_period: Mapped[str] = mapped_column(String(120), default="")
+    why_it_matters: Mapped[str] = mapped_column(Text)
+    next_action: Mapped[str] = mapped_column(String(250))
+    confidence: Mapped[str] = mapped_column(String(30))
+    data_quality: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(20), default="unread")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class RecommendationOutcome(Base):
+    __tablename__ = "recommendation_outcomes"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"), index=True)
+    insight_id: Mapped[str | None] = mapped_column(ForeignKey("business_insights.id", ondelete="SET NULL"))
+    recommendation: Mapped[str] = mapped_column(String(250))
+    assumptions: Mapped[str] = mapped_column(Text, default="[]")
+    selected_action: Mapped[str] = mapped_column(String(500))
+    baseline: Mapped[str] = mapped_column(Text, default="{}")
+    observation_start: Mapped[date] = mapped_column(Date)
+    observation_end: Mapped[date | None] = mapped_column(Date)
+    actual_outcome: Mapped[str | None] = mapped_column(Text)
+    fairly_comparable: Mapped[bool | None] = mapped_column(Boolean)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 

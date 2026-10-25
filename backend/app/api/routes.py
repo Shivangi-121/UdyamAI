@@ -17,16 +17,20 @@ from app.models import (
     ActionHistory,
     AIRecommendation,
     AutopilotTask,
+    BusinessInsight,
     CampaignDraft,
     Expense,
     InventoryRecord,
     Merchant,
     Product,
+    RecommendationOutcome,
     Sale,
     Scenario,
 )
 from app.schemas.api import (
     AssistantRequest,
+    AnalysisResult,
+    BusinessInsightOut,
     CampaignCreate,
     CampaignGenerate,
     CampaignGenerated,
@@ -37,12 +41,17 @@ from app.schemas.api import (
     ExpenseUpdate,
     HealthOut,
     InventoryUpdate,
+    InventoryRisk,
+    InsightStatus,
     MerchantOut,
     MerchantUpdate,
     ProductCreate,
     ProductOut,
     ProductUpdate,
     Recommendation,
+    OutcomeCreate,
+    OutcomeOut,
+    OutcomeUpdate,
     SaleCreate,
     SaleOut,
     SaleUpdate,
@@ -52,10 +61,11 @@ from app.schemas.api import (
     SummaryOut,
     TaskCreate,
     TaskOut,
-    TaskStatus,
+    TaskUpdate,
 )
 from app.services.assistant import answer_question, generate_campaign
 from app.services.calculations import simulate_scenario
+from app.services.intelligence import _inventory_risks, _serialize_insight, analyze_merchant
 
 router = APIRouter(prefix="/api")
 _assistant_requests: dict[str, deque[float]] = defaultdict(deque)
@@ -414,6 +424,150 @@ def summary(
     )
 
 
+@router.post("/merchants/{merchant_id}/intelligence/analyze", response_model=AnalysisResult)
+def analyze_business(
+    merchant_id: str,
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    get_merchant(db, merchant_id)
+    return analyze_merchant(db, merchant_id)
+
+
+@router.get("/merchants/{merchant_id}/insights", response_model=list[BusinessInsightOut])
+def list_insights(
+    merchant_id: str,
+    include_dismissed: bool = False,
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    get_merchant(db, merchant_id)
+    query = select(BusinessInsight).where(BusinessInsight.merchant_id == merchant_id)
+    if not include_dismissed:
+        query = query.where(
+            BusinessInsight.status != "dismissed",
+            (BusinessInsight.is_active.is_(True)) | (BusinessInsight.status == "saved"),
+        )
+    results = db.scalars(query.order_by(BusinessInsight.priority.desc(), BusinessInsight.generated_at.desc()).limit(50))
+    return [_serialize_insight(item) for item in results]
+
+
+@router.patch("/merchants/{merchant_id}/insights/{insight_id}", response_model=BusinessInsightOut)
+def update_insight_status(
+    merchant_id: str,
+    insight_id: str,
+    payload: InsightStatus,
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    get_merchant(db, merchant_id)
+    insight = db.scalar(select(BusinessInsight).where(
+        BusinessInsight.id == insight_id,
+        BusinessInsight.merchant_id == merchant_id,
+    ))
+    if insight is None:
+        raise HTTPException(status_code=404, detail="Insight not found")
+    writable_merchant(db, merchant_id)
+    insight.status = payload.status
+    db.commit()
+    db.refresh(insight)
+    return _serialize_insight(insight)
+
+
+@router.get("/merchants/{merchant_id}/inventory-risks", response_model=list[InventoryRisk])
+def inventory_risks(
+    merchant_id: str,
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    get_merchant(db, merchant_id)
+    products = list(db.scalars(select(Product).where(Product.merchant_id == merchant_id)))
+    sales = list(db.scalars(select(Sale).where(Sale.merchant_id == merchant_id, Sale.date <= date.today())))
+    return _inventory_risks(products, sales, date.today())
+
+
+def _serialize_outcome(item: RecommendationOutcome) -> dict:
+    return {
+        "id": item.id,
+        "merchant_id": item.merchant_id,
+        "insight_id": item.insight_id,
+        "recommendation": item.recommendation,
+        "assumptions": json.loads(item.assumptions),
+        "selected_action": item.selected_action,
+        "baseline": json.loads(item.baseline),
+        "observation_start": item.observation_start,
+        "observation_end": item.observation_end,
+        "actual_outcome": json.loads(item.actual_outcome) if item.actual_outcome else None,
+        "fairly_comparable": item.fairly_comparable,
+        "created_at": item.created_at,
+    }
+
+
+@router.get("/merchants/{merchant_id}/outcomes", response_model=list[OutcomeOut])
+def list_outcomes(merchant_id: str, db: Session = Depends(get_db), _: str = Depends(authorized_merchant)):
+    get_merchant(db, merchant_id)
+    outcomes = db.scalars(
+        select(RecommendationOutcome)
+        .where(RecommendationOutcome.merchant_id == merchant_id)
+        .order_by(RecommendationOutcome.created_at.desc())
+    )
+    return [_serialize_outcome(item) for item in outcomes]
+
+
+@router.post("/merchants/{merchant_id}/outcomes", response_model=OutcomeOut, status_code=201)
+def create_outcome(
+    merchant_id: str,
+    payload: OutcomeCreate,
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    writable_merchant(db, merchant_id)
+    if payload.insight_id and db.scalar(select(BusinessInsight.id).where(
+        BusinessInsight.id == payload.insight_id,
+        BusinessInsight.merchant_id == merchant_id,
+    )) is None:
+        raise HTTPException(status_code=404, detail="Insight not found")
+    outcome = RecommendationOutcome(
+        id=str(uuid4()),
+        merchant_id=merchant_id,
+        insight_id=payload.insight_id,
+        recommendation=payload.recommendation,
+        assumptions=json.dumps(payload.assumptions),
+        selected_action=payload.selected_action,
+        baseline=json.dumps(payload.baseline, default=str),
+        observation_start=payload.observation_start,
+    )
+    db.add(outcome)
+    db.commit()
+    db.refresh(outcome)
+    return _serialize_outcome(outcome)
+
+
+@router.patch("/merchants/{merchant_id}/outcomes/{outcome_id}", response_model=OutcomeOut)
+def update_outcome(
+    merchant_id: str,
+    outcome_id: str,
+    payload: OutcomeUpdate,
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    writable_merchant(db, merchant_id)
+    outcome = db.scalar(select(RecommendationOutcome).where(
+        RecommendationOutcome.id == outcome_id,
+        RecommendationOutcome.merchant_id == merchant_id,
+    ))
+    if outcome is None:
+        raise HTTPException(status_code=404, detail="Outcome record not found")
+    if payload.observation_end < outcome.observation_start:
+        raise HTTPException(status_code=422, detail="Observation end must not be before its start date")
+    outcome.observation_end = payload.observation_end
+    outcome.actual_outcome = json.dumps(payload.actual_outcome, default=str)
+    outcome.fairly_comparable = payload.fairly_comparable
+    db.commit()
+    db.refresh(outcome)
+    return _serialize_outcome(outcome)
+
+
 @router.post("/merchants/{merchant_id}/scenarios", response_model=ScenarioOut, status_code=201)
 def create_scenario(
     merchant_id: str,
@@ -614,7 +768,7 @@ def create_task_plan(merchant_id: str, payload: TaskCreate, db: Session = Depend
 def update_task(
     merchant_id: str,
     task_id: str,
-    payload: TaskStatus,
+    payload: TaskUpdate,
     db: Session = Depends(get_db),
     _: str = Depends(authorized_merchant),
 ):
@@ -622,17 +776,31 @@ def update_task(
     task = db.scalar(select(AutopilotTask).where(AutopilotTask.id == task_id, AutopilotTask.merchant_id == merchant_id))
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
-    valid_transitions = {
-        "proposed": {"approved", "rejected"},
-        "approved": {"in_progress", "completed"},
-        "in_progress": {"completed"},
-        "rejected": set(),
-        "completed": set(),
-    }
-    if payload.status not in valid_transitions[task.status]:
-        raise HTTPException(status_code=409, detail=f"Cannot change task from {task.status} to {payload.status}")
-    task.status = payload.status
-    db.add(ActionHistory(merchant_id=merchant_id, task_id=task.id, action=payload.status, details="Checklist status changed; no external action was performed."))
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=422, detail="Provide a task title or status to update")
+    if "status" in updates and updates["status"] is None:
+        raise HTTPException(status_code=422, detail="Task status cannot be null")
+    if "title" in updates:
+        if updates["title"] is None or not updates["title"].strip():
+            raise HTTPException(status_code=422, detail="Task title cannot be empty")
+        if task.status != "proposed":
+            raise HTTPException(status_code=409, detail="Only proposed checklist items can be edited")
+        task.title = updates["title"].strip()
+    action = "edited"
+    if "status" in updates:
+        valid_transitions = {
+            "proposed": {"approved", "rejected"},
+            "approved": {"in_progress", "completed"},
+            "in_progress": {"completed"},
+            "rejected": set(),
+            "completed": set(),
+        }
+        if updates["status"] not in valid_transitions[task.status]:
+            raise HTTPException(status_code=409, detail=f"Cannot change task from {task.status} to {updates['status']}")
+        task.status = updates["status"]
+        action = updates["status"]
+    db.add(ActionHistory(merchant_id=merchant_id, task_id=task.id, action=action, details="Checklist item updated; no external action was performed."))
     db.commit()
     db.refresh(task)
     return task
