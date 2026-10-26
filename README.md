@@ -96,7 +96,7 @@ Open `http://127.0.0.1:5173`. The app can also be opened directly from `frontend
 
 In UdyamAI, open **Settings → Connect to the backend**:
 
-1. Keep the backend address as `http://127.0.0.1:8000`.
+1. Enter the backend address. For local development use `http://127.0.0.1:8000`; for a deployed frontend, use your public HTTPS backend URL.
 2. Select the merchant you intend to use.
 3. Enter that merchant's token from `backend\.env`.
 4. Select **Connect and load records**.
@@ -111,7 +111,21 @@ This is not real authentication and must not be used to protect private or produ
 
 The onboarding flow can be resumed later and profile settings can be edited from Settings. Backend-only features such as server analytics, CSV import/export, and voice API requests require a separately deployed and connected backend.
 
-Onboarding and profile settings include business type and stage, sales channels and tracking, team size, goals, location, currency, preferred language, explanation detail, assistant interaction, notification preferences, and a Light, Dark, or System theme. The assistant receives relevant profile preferences from the server; they guide its wording and priorities but are not treated as measured business facts. Theme and language can also be changed from the existing app controls.
+### Deploy the frontend to Vercel
+
+The frontend is a static site and needs no Node.js build or install step. In Vercel, import this repository and configure:
+
+1. **Root Directory:** `frontend`
+2. **Framework Preset:** `Other`
+3. **Build Command:** leave empty
+4. **Output Directory:** `.`
+5. **Install Command:** leave empty
+
+The included `frontend/vercel.json` sets the static output directory and basic browser security headers. No frontend environment variables or backend URL are required for the local demo profile, business workspace, and local demo tools. Demo login is not authentication and the browser-local data is neither secured nor shared. Do not store real customer or sensitive business information in this deployment mode.
+
+The optional Settings → Connect to the backend integration is separate: it still needs a public HTTPS FastAPI URL entered in the browser and a backend configured for the deployed Vercel origin. It does not automatically read Vercel environment variables. Account-backed sign-in, cross-device persistence, API analytics, CSV import/export, and backend AI/voice features are not enabled by this frontend-only deployment. Do not put database credentials, API secrets, or privileged tokens in frontend settings or Vercel frontend environment variables.
+
+Onboarding and profile settings include business type and stage, sales channels and tracking, team size, goals, location, currency, preferred language, explanation detail, assistant interaction, notification preferences, and a Light, Dark, or System theme. When connected to the backend, profile preferences can guide assistant wording and priorities but are not treated as measured business facts. Theme and language can also be changed from the existing app controls.
 
 The backend account API (not used by the frontend-only demo dialog) implements a short-lived bearer access token plus a rotating, HttpOnly refresh cookie protected by a CSRF token. Backend password recovery sends a single-use link that expires after 30 minutes. Configure SMTP to enable recovery. The backend routes are `/api/auth/register`, `/api/auth/login`, `/api/auth/session`, `/api/auth/profile`, `/api/auth/password-reset/request`, and `/api/auth/password-reset/complete`.
 

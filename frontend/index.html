@@ -379,7 +379,7 @@
             </div>
             <div class="settings-card" id="demoBusinessSettings"><h2>Explore a demo business</h2><p>Demo records are clearly marked and separate from your own information.</p><label class="inline-select">Business <select id="merchantSelect"><option value="personal">My business</option><option value="coconut">Coconut street vendor</option><option value="kirana">Kirana store</option></select></label></div>
             <div class="settings-card" id="backendConnectionSettings"><h2>Connect to the backend</h2><p>Optional development connection. When connected, new sales, expenses, products and drafts are saved to the server. Your bearer token stays in memory until you refresh.</p>
-              <label class="inline-select">Backend address <input id="backendUrl" type="url" value="http://127.0.0.1:8001" autocomplete="url"></label>
+              <label class="inline-select">Backend address <input id="backendUrl" type="url" placeholder="https://your-api.example.com" autocomplete="url"></label>
               <label class="inline-select">Merchant access token <input id="backendToken" type="password" autocomplete="off" placeholder="Paste a configured merchant token"></label>
               <div class="dialog-actions"><button class="button-primary" id="connectBackend" type="button">Connect and load records</button><button class="outline-button" id="disconnectBackend" type="button">Disconnect</button></div>
               <p id="backendStatus" role="status" aria-live="polite">Not connected. This preview continues to work with local browser storage.</p>
