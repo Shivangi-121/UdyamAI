@@ -21,10 +21,10 @@
   <title>UdyamAI — Your business, one step at a time</title>
   <link rel="stylesheet" href="styles.css">
   <script src="data.js" defer></script>
-  <script src="store.js" defer></script>
+  <script src="store.js?v=20261026-auth-gate-v2" defer></script>
   <script src="services.js" defer></script>
   <script src="api.js" defer></script>
-  <script src="app.js" defer></script>
+  <script src="app.js?v=20261026-auth-gate-v2" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -346,7 +346,7 @@
             </div>
             <div class="settings-card" id="demoBusinessSettings"><h2>Explore a demo business</h2><p>Demo records are clearly marked and separate from your own information.</p><label class="inline-select">Business <select id="merchantSelect"><option value="personal">My business</option><option value="coconut">Coconut street vendor</option><option value="kirana">Kirana store</option></select></label></div>
             <div class="settings-card" id="backendConnectionSettings"><h2>Connect to the backend</h2><p>Optional development connection. When connected, new sales, expenses, products and drafts are saved to the server. Your bearer token stays in memory until you refresh.</p>
-              <label class="inline-select">Backend address <input id="backendUrl" type="url" value="http://127.0.0.1:8000" autocomplete="url"></label>
+              <label class="inline-select">Backend address <input id="backendUrl" type="url" value="http://127.0.0.1:8001" autocomplete="url"></label>
               <label class="inline-select">Merchant access token <input id="backendToken" type="password" autocomplete="off" placeholder="Paste a configured merchant token"></label>
               <div class="dialog-actions"><button class="button-primary" id="connectBackend" type="button">Connect and load records</button><button class="outline-button" id="disconnectBackend" type="button">Disconnect</button></div>
               <p id="backendStatus" role="status" aria-live="polite">Not connected. This preview continues to work with local browser storage.</p>
@@ -453,8 +453,11 @@
   </dialog>
   <dialog id="accountDialog" class="app-dialog">
     <div class="dialog-card account-dialog">
-      <button type="button" class="dialog-close" data-close="accountDialog" aria-label="Close">×</button>
-      <section id="signInPanel">
+      <p class="eyebrow">ACCOUNT ACCESS</p>
+      <label class="auth-backend-label" for="authBackendUrl">UdyamAI server address</label>
+      <input id="authBackendUrl" type="url" value="http://127.0.0.1:8001" autocomplete="url" required>
+      <p class="form-error" id="authGateNotice" role="alert" hidden></p>
+      <section id="signInPanel" hidden>
         <p class="eyebrow">WELCOME BACK</p><h2>Sign in to UdyamAI</h2><p class="dialog-copy">Your account syncs your business profile and preferences.</p>
         <form id="signInForm">
           <label for="signInEmail">Email</label><input id="signInEmail" type="email" autocomplete="username" required maxlength="320">
@@ -464,8 +467,8 @@
         </form>
         <button class="text-button" id="showRegister" type="button">Create an account</button>
       </section>
-      <section id="registerPanel" hidden>
-        <p class="eyebrow">A GOOD PLACE TO BEGIN</p><h2>Create your account</h2><p class="dialog-copy">Only your email and password are required. You can add business details later.</p>
+      <section id="registerPanel">
+        <p class="eyebrow">A GOOD PLACE TO BEGIN</p><h2>Create your account</h2><p class="dialog-copy">Create an account to get started. Your business workspace opens as soon as registration succeeds.</p>
         <form id="registerForm">
           <label for="registerName">Your name <span class="optional-label">Optional</span></label><input id="registerName" type="text" autocomplete="name" maxlength="120">
           <label for="registerBusiness">Business name <span class="optional-label">Optional</span></label><input id="registerBusiness" type="text" autocomplete="organization" maxlength="160">

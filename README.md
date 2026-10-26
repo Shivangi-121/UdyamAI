@@ -105,7 +105,7 @@ The bundled `dev-personal-token`, `dev-coconut-token`, and `dev-kirana-token` va
 
 ### 4. Create an account (optional)
 
-Use **Create account** or **Sign in** in Settings to save a business profile and its preferences in the backend. Account-owned business records are scoped to that account; legacy merchant-token connections and the browser-local preview remain available. Account records are not copied into browser local storage. After sign-in, the onboarding flow can be resumed later and profile settings can be edited from Settings.
+Create an account on the entry screen before using the workspace; returning users can switch to **Sign in**. After successful registration or sign-in, UdyamAI opens the home screen. Account-owned business records are scoped to that account; account records are not copied into browser local storage. The onboarding flow can be resumed later and profile settings can be edited from Settings.
 
 Onboarding and profile settings include business type and stage, sales channels and tracking, team size, goals, location, currency, preferred language, explanation detail, assistant interaction, notification preferences, and a Light, Dark, or System theme. The assistant receives relevant profile preferences from the server; they guide its wording and priorities but are not treated as measured business facts. Theme and language can also be changed from the existing app controls.
 

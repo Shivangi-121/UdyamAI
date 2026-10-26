@@ -19,6 +19,7 @@ let insightError = '';
 let conversationHistory = [];
 let accountProfile = window.UdyamAPI.profile();
 let pendingResetToken = new URLSearchParams(window.location.search).get('reset_token');
+document.body.classList.add('auth-required');
 if (pendingResetToken) {
   window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
 }
@@ -211,6 +212,15 @@ function applyBackendRecords(records, merchantId) {
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+try {
+  const savedBackendUrl = localStorage.getItem('udyamai-api-url');
+  if (savedBackendUrl) {
+    $('#authBackendUrl').value = savedBackendUrl;
+    $('#backendUrl').value = savedBackendUrl;
+  }
+} catch (error) {
+  console.warn('Could not restore the saved API address.', error);
+}
 const money = value => new Intl.NumberFormat(state.language === 'hi' ? 'en-IN' : 'en-IN', {
   style: 'currency',
   currency: accountProfile?.currency || 'INR',
@@ -1128,6 +1138,7 @@ function openDialog(id) {
 }
 
 function closeDialog(id) {
+  if (id === 'accountDialog' && document.body.classList.contains('auth-required')) return;
   document.getElementById(id).close();
 }
 
@@ -1733,11 +1744,50 @@ $('#showRegister').addEventListener('click', () => showAccountDialog('registerPa
 $('#showSignIn').addEventListener('click', () => showAccountDialog('signInPanel'));
 $('#showForgotPassword').addEventListener('click', () => showAccountDialog('forgotPasswordPanel'));
 $('#forgotBackToSignIn').addEventListener('click', () => showAccountDialog('signInPanel'));
+$('#authBackendUrl').addEventListener('input', event => {
+  $('#backendUrl').value = event.target.value;
+  try {
+    localStorage.setItem('udyamai-api-url', event.target.value.trim());
+  } catch (error) {
+    $('#authGateNotice').textContent = `Could not remember the server address on this device: ${error.message}`;
+    $('#authGateNotice').hidden = false;
+  }
+});
+$('#backendUrl').addEventListener('input', event => {
+  $('#authBackendUrl').value = event.target.value;
+  try {
+    localStorage.setItem('udyamai-api-url', event.target.value.trim());
+  } catch (error) {
+    $('#backendStatus').textContent = `Could not remember the server address on this device: ${error.message}`;
+  }
+});
+$('#accountDialog').addEventListener('cancel', event => {
+  if (document.body.classList.contains('auth-required')) event.preventDefault();
+});
 function showAccountDialog(panelId) {
   ['signInPanel', 'registerPanel', 'forgotPasswordPanel', 'resetPasswordPanel'].forEach(id => {
     $(`#${id}`).hidden = id !== panelId;
   });
+  $('#authGateNotice').hidden = true;
+  document.body.classList.add('auth-required');
+  $('#accountDialog').classList.add('auth-gate');
+  $('#accountDialog').querySelector('.dialog-close')?.setAttribute('hidden', '');
   openDialog('accountDialog');
+}
+
+function authBackendUrl() {
+  const value = $('#authBackendUrl').value.trim();
+  if (!value) throw new Error('Enter the UdyamAI server address.');
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('Enter a valid UdyamAI server address.');
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('The UdyamAI server address must use HTTP or HTTPS.');
+  }
+  return url.toString().replace(/\/+$/, '');
 }
 
 function showFormError(selector, message) {
@@ -1766,14 +1816,12 @@ function connectAccountRecords(records) {
     currency: savedAnswers.currency || records.profile.currency || 'INR'
   };
   applyBackendRecords(records, records.profile.merchant_id);
+  document.body.classList.remove('auth-required');
+  $('#accountDialog').classList.remove('auth-gate');
   $('#sessionExpiredNotice').hidden = true;
   closeDialog('accountDialog');
   $('#accountDialog').querySelectorAll('form').forEach(form => form.reset());
-  if (!records.profile.onboarding_completed) {
-    wizardStep = Math.min(records.profile.onboarding_step || 0, wizardQuestions.length - 1);
-    renderWizard();
-    openDialog('onboardingDialog');
-  }
+  showPage('home');
 }
 
 $('#signInForm').addEventListener('submit', async event => {
@@ -1781,7 +1829,7 @@ $('#signInForm').addEventListener('submit', async event => {
   showFormError('#signInError', '');
   try {
     const records = await window.UdyamAPI.signIn(
-      $('#backendUrl').value.trim(),
+      authBackendUrl(),
       $('#signInEmail').value.trim(),
       $('#signInPassword').value
     );
@@ -1796,7 +1844,7 @@ $('#registerForm').addEventListener('submit', async event => {
   event.preventDefault();
   showFormError('#registerError', '');
   try {
-    const records = await window.UdyamAPI.register($('#backendUrl').value.trim(), {
+    const records = await window.UdyamAPI.register(authBackendUrl(), {
       email: $('#registerEmail').value.trim(),
       password: $('#registerPassword').value,
       full_name: $('#registerName').value.trim(),
@@ -1813,7 +1861,7 @@ $('#forgotPasswordForm').addEventListener('submit', async event => {
   event.preventDefault();
   showFormError('#forgotPasswordError', '');
   try {
-    await window.UdyamAPI.requestPasswordReset($('#backendUrl').value.trim(), $('#resetEmail').value.trim());
+    await window.UdyamAPI.requestPasswordReset(authBackendUrl(), $('#resetEmail').value.trim());
     showFormError('#forgotPasswordError', 'If an account exists for this email, instructions will be sent shortly.');
     $('#forgotPasswordError').classList.remove('form-error');
     $('#forgotPasswordError').classList.add('form-success');
@@ -1827,7 +1875,7 @@ $('#resetPasswordForm').addEventListener('submit', async event => {
   showFormError('#resetPasswordError', '');
   try {
     await window.UdyamAPI.completePasswordReset(
-      $('#backendUrl').value.trim(),
+      authBackendUrl(),
       pendingResetToken || '',
       $('#newPassword').value
     );
@@ -1852,8 +1900,9 @@ $('#accountSignOut').addEventListener('click', async () => {
   state = window.UdyamStore.load();
   showAllTransactions = false;
   render();
+  showAccountDialog('signInPanel');
   if (signOutError) showToast(`Signed out on this device, but the server could not revoke the session: ${signOutError.message}`);
-  else showToast('You have signed out. Your local preview remains available.');
+  else showToast('You have signed out.');
 });
 
 $('#accountProfileForm').addEventListener('submit', async event => {
@@ -1900,6 +1949,7 @@ window.addEventListener('udyamai:session-expired', () => {
   state = window.UdyamStore.load();
   $('#sessionExpiredNotice').hidden = false;
   render();
+  showAccountDialog('signInPanel');
 });
 
 $('#merchantSelect').addEventListener('change', event => {
@@ -2892,12 +2942,16 @@ $('#resetButton').addEventListener('click', () => {
 render();
 if (pendingResetToken) {
   showAccountDialog('resetPasswordPanel');
-} else if (document.cookie.includes('udyamai_csrf=')) {
-  window.UdyamAPI.restoreSession($('#backendUrl').value.trim())
-    .then(records => connectAccountRecords(records))
-    .catch(error => {
-      $('#sessionExpiredNotice').textContent = `Could not restore your session. Sign in again to sync business records. (${error.message})`;
-      $('#sessionExpiredNotice').hidden = false;
-      console.warn('Could not restore the account session.', error);
-    });
+} else {
+  showAccountDialog('registerPanel');
+  if (document.cookie.includes('udyamai_csrf=')) {
+    window.UdyamAPI.restoreSession(authBackendUrl())
+      .then(records => connectAccountRecords(records))
+      .catch(error => {
+        showAccountDialog('signInPanel');
+        $('#authGateNotice').textContent = `Could not restore your session. Sign in to continue. (${error.message})`;
+        $('#authGateNotice').hidden = false;
+        console.warn('Could not restore the account session.', error);
+      });
+  }
 }

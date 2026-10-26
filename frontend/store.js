@@ -117,7 +117,7 @@ window.UdyamStore = (() => {
   function makeView() {
     return new Proxy(model, {
       get(target, key) {
-        if (key === 'sample') return target.currentMerchantId !== 'personal';
+        if (key === 'sample') return target.currentMerchantId === 'coconut' || target.currentMerchantId === 'kirana';
         if (key === 'business') return current();
         if (['sales', 'expenses', 'products', 'onboarding', 'transactions', 'campaigns', 'tasks', 'scenarios', 'name', 'category'].includes(key)) return current()[key];
         return target[key];

@@ -117,6 +117,8 @@ html[data-theme="dark"] .money-icon.note{background:#263a48;color:#a4d6f2}
 .session-expired-notice,.form-success{color:#a95d43}
 .account-dialog{max-width:460px}
 .account-dialog form{display:grid;gap:8px}
+.account-dialog .auth-backend-label{display:block;margin:6px 0 0;color:var(--muted);font-size:11px;font-weight:600}
+.account-dialog>#authBackendUrl{width:100%;height:42px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--white);color:var(--ink)}
 .account-dialog form>label{margin-top:8px;color:var(--muted);font-size:12px}
 .account-dialog form>input{width:100%;height:42px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--white);color:var(--ink)}
 .account-dialog .form-error{margin:4px 0;color:#b34838;font-size:12px}
@@ -130,4 +132,11 @@ html[data-theme="dark"] .money-icon.note{background:#263a48;color:#a4d6f2}
 .wizard-summary h3{margin:0 0 7px;font-size:14px}
 .wizard-summary p{margin:0;color:var(--muted);font-size:12px}
 html[data-theme="dark"] .wizard-summary{background:#202d29;border-color:var(--line)}
+body.auth-required .app-shell,body.auth-required .floating-voice-button,body.auth-required .voice-panel{visibility:hidden;pointer-events:none}
+body.auth-required .skip-link{visibility:hidden}
+body.auth-required #accountDialog[open]{width:min(460px,calc(100% - 28px));max-width:none;max-height:calc(100vh - 28px);overflow:auto;border:1px solid var(--line);border-radius:18px;padding:0;box-shadow:0 24px 90px rgba(0,0,0,.18)}
+body.auth-required #accountDialog::backdrop{background:var(--paper);opacity:1}
+body.auth-required #accountDialog .account-dialog{width:100%;max-width:none;padding:30px}
+body.auth-required #accountDialog .account-dialog>section:not([hidden]){margin-top:20px}
+body.auth-required #accountDialog .dialog-copy{color:var(--muted)}
 @media(max-width:760px){.theme-toggle{width:36px;height:36px}.profile-settings{padding:17px}.profile-choice-group{gap:10px}.account-dialog{max-height:calc(100vh - 24px);overflow:auto}}
