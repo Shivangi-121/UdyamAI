@@ -147,9 +147,15 @@ class ScenarioOut(ORMModel):
     created_at: datetime
 
 
+class ConversationTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class AssistantRequest(BaseModel):
     question: str = Field(min_length=2, max_length=2000)
     language: Literal["en", "hi"] = "en"
+    context: list[ConversationTurn] = Field(default_factory=list, max_length=8)
 
 
 class Recommendation(BaseModel):
@@ -158,9 +164,18 @@ class Recommendation(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
     next_action: str
-    source: Literal["llm", "demo"] = "demo"
+    source: Literal["llm", "demo", "rules"] = "demo"
     observed_data: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
+
+
+class VoiceConversationOut(BaseModel):
+    transcript: str = Field(min_length=1, max_length=2000)
+    transcript_language: str | None = None
+    response: Recommendation
+    speech_audio: str | None = None
+    speech_content_type: str | None = None
+    speech_error: str | None = None
 
 
 class CampaignCreate(BaseModel):

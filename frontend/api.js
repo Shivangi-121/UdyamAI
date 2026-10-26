@@ -10,14 +10,13 @@ window.UdyamAPI = (() => {
   async function request(path, options = {}) {
     if (!connection) throw new Error('Connect to the backend first.');
     let response;
+    const headers = { ...options.headers };
+    if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+    headers.Authorization = `Bearer ${connection.token}`;
     try {
       response = await fetch(`${connection.baseUrl}${path}`, {
         ...options,
-        headers: {
-          Authorization: `Bearer ${connection.token}`,
-          'Content-Type': 'application/json',
-          ...options.headers
-        }
+        headers
       });
     } catch (error) {
       throw new Error('Could not reach the backend. Check that it is running and retry.');
@@ -75,6 +74,15 @@ window.UdyamAPI = (() => {
   const json = value => ({ method: 'POST', body: JSON.stringify(value) });
   const patch = value => ({ method: 'PATCH', body: JSON.stringify(value) });
 
+  function askVoice({ audio, language, context, speechEnabled }) {
+    const body = new FormData();
+    body.append('audio', audio, audio.name || 'recording.webm');
+    body.append('language', language || 'auto');
+    body.append('context_json', JSON.stringify(context || []));
+    body.append('speech_enabled', String(Boolean(speechEnabled)));
+    return request(merchantPath('/assistant/voice'), { method: 'POST', body });
+  }
+
   return {
     connect,
     disconnect,
@@ -100,6 +108,7 @@ window.UdyamAPI = (() => {
     createOutcome: payload => request(merchantPath('/outcomes'), json(payload)),
     updateOutcome: (outcomeId, payload) => request(merchantPath(`/outcomes/${encodeURIComponent(outcomeId)}`), patch(payload)),
     ask: payload => request(merchantPath('/assistant'), json(payload)),
+    askVoice,
     askTeam: payload => request(merchantPath('/assistant/team'), json(payload))
   };
 })();

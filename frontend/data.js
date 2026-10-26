@@ -1,9 +1,15 @@
 /* Shared prototype data and JSDoc contracts; this file contains no UI logic. */
 window.UdyamData = (() => {
   const date = offset => {
-    const value = new Date();
-    value.setDate(value.getDate() - offset);
-    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(new Date());
+    const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    const businessDay = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day) - offset));
+    return businessDay.toISOString().slice(0, 10);
   };
 
   /** @typedef {{id:string,name:string,quantity:number|null,cost:number|null,price:number|null,category?:string}} Product */

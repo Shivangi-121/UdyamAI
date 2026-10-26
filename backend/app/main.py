@@ -27,7 +27,12 @@ async def limit_request_size(request: Request, call_next):
     content_length = request.headers.get("content-length")
     if content_length:
         try:
-            too_large = int(content_length) > settings.max_request_bytes
+            max_bytes = (
+                settings.sarvam_max_audio_bytes + 65_536
+                if request.url.path.endswith("/assistant/voice")
+                else settings.max_request_bytes
+            )
+            too_large = int(content_length) > max_bytes
         except ValueError:
             return JSONResponse(status_code=400, content={"error": "invalid_content_length", "message": "Invalid content length."})
         if too_large:

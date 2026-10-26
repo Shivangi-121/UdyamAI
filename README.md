@@ -6,13 +6,17 @@ UdyamAI helps small-business owners keep track of sales, expenses, products, and
 
 The project is designed to be transparent: calculations use recorded data and deterministic business rules; demo data is labeled; and suggested campaigns or tasks never send messages, place orders, or spend money.
 
+See the [feature matrix](./docs/FEATURE_MATRIX.md) for implementation status and
+known boundaries, and the [demo guide](./docs/DEMO_GUIDE.md) for a repeatable
+judge-ready walkthrough.
+
 ## Highlights
 
 - **Simple business records:** Track sales, expenses, products, and stock counts.
 - **Business overview:** Review daily totals, recent transactions, and supported business insights.
 - **Business Twin:** Compare user-entered business scenarios with deterministic calculations.
 - **Assistant:** Ask business questions in English or Hindi using local demo responses or the optional backend AI integration.
-- **Voice assistant:** Open the persistent microphone control from any page. Where the browser supports the Web Speech API, speak a request, review or edit its transcript, and hear the assistant response. Text input remains available when speech recognition is unsupported or unavailable.
+- **Bilingual voice assistant:** With a backend Sarvam key configured, record Hindi, English, or code-mixed speech, send it through Saaras transcription, the shared merchant assistant, and Bulbul speech playback. Typed input remains available as a fallback.
 - **Campaign Studio:** Create, edit, and save promotional drafts. Drafts are never sent.
 - **Action plan:** Turn a goal into a checklist that the merchant can review and manage.
 - **Flexible storage:** Run entirely in the browser with local storage, or connect to the optional API and database.
@@ -47,7 +51,7 @@ The frontend has no JavaScript package installation step. The backend uses SQLAl
 
 - Python 3.12 (the commands below use the Python launcher on Windows)
 - A modern browser
-- Optional: an OpenAI-compatible chat-completions API key and model for live AI-generated responses
+- Optional: a Sarvam AI API key for backend speech recognition, chat, and speech synthesis. An OpenAI-compatible chat provider remains supported for text-only assistant and campaign generation.
 
 ## Run locally
 
@@ -72,6 +76,10 @@ python -m uvicorn app.main:app --reload
 ```
 
 The API runs at `http://127.0.0.1:8000`. Visit `http://127.0.0.1:8000/docs` for the interactive API reference or `http://127.0.0.1:8000/api/health` for the health check.
+
+To replace only seeded sample merchants and their demo records before a fresh
+walkthrough, run `python -m app.seed --reset-demo` from `backend`. Personal
+merchant records are preserved.
 
 ### 2. Serve the frontend
 
@@ -109,17 +117,34 @@ Backend settings are read from environment variables and `backend\.env`. See [`b
 | `LLM_MODEL` | Model name used for assistant and campaign generation. |
 | `AI_TIMEOUT_SECONDS` | Maximum duration for a provider request. |
 | `AI_REQUESTS_PER_MINUTE` | Per-merchant limit for assistant and campaign requests. |
+| `SARVAM_API_KEY` | Backend-only API key; get one from the [Sarvam AI dashboard](https://dashboard.sarvam.ai/). |
+| `SARVAM_CHAT_MODEL` | Sarvam chat model; defaults to `sarvam-105b`. |
+| `SARVAM_STT_MODEL` | Speech transcription model; defaults to `saaras:v4`. |
+| `SARVAM_TTS_MODEL` | Speech synthesis model; defaults to `bulbul:v4-flash`. |
+| `SARVAM_TTS_SPEAKER` | Voice persona compatible with the selected TTS model; defaults to `shubh_enhi_ads`. |
+| `SARVAM_TTS_ENABLED` | Enables spoken replies; defaults to `true`. |
+| `SARVAM_MAX_AUDIO_BYTES` | Maximum uploaded recording size; defaults to 5,000,000 bytes. |
 | `INTELLIGENCE_CHANGE_THRESHOLD` | Relative change threshold for supported sales/expense insights. |
 
-When both `LLM_API_KEY` and `LLM_MODEL` are set, the backend can use the configured provider for assistant recommendations and campaign copy. Without them, it returns clearly labeled deterministic demo responses. Financial metrics and scenario results are computed by application code, not invented by the language model. Never put provider credentials in frontend code.
+When `SARVAM_API_KEY` is configured, Sarvam is used for assistant chat and campaign generation. Without it, the existing OpenAI-compatible provider can still generate text replies and campaign copy when both `LLM_API_KEY` and `LLM_MODEL` are set; otherwise the assistant uses clearly labeled deterministic demo responses. Financial metrics and scenario results are computed by application code, not invented by the language model. Keep provider credentials in the backend `.env` only; never add them to frontend files or browser settings.
 
 ## Voice assistant
 
-The persistent microphone button is available on every application page. Select it to open the assistant, then start listening from the microphone control. The transcript can be reviewed or corrected before sending. The response is displayed in the panel and can be read aloud using browser speech synthesis; speech can be muted.
+The persistent microphone button is available on every application page. When connected to the authenticated backend, selecting the microphone records up to 60 seconds and uploads the audio to `/api/merchants/{merchant_id}/assistant/voice`. Saaras transcribes the recording; the transcript, response, and any playable Bulbul audio appear in the existing voice panel. The recording is held in memory for the request and is not stored by UdyamAI. The browser requests microphone permission only after activation and requires a secure context (HTTPS in deployment; localhost is suitable for local development).
 
-Speech recognition and speech synthesis depend on browser and device support. Microphone access is requested only after the user activates listening, and may require permission and a secure browser context. If recognition is unsupported or permission is denied, use the text-input fallback. Hindi recognition uses the browser's `hi-IN` locale when selected; English uses `en-US`. Mixed Hindi-English recognition quality and voice availability vary by browser and installed language packs.
+Sarvam uses the documented `saaras:v4` model with language auto-detection, which preserves the spoken language and supports Hindi, English, and code-mixed speech. Saaras v4 automatically handles the available transcription formats; if configured to use Saaras v3, the integration requests its `codemix` mode. Chat uses `sarvam-105b`; speech output uses `bulbul:v4-flash` and the configured compatible persona. Response language follows the detected transcript language and the assistant's language instructions. Recognition and pronunciation quality can vary, especially for regional accents, names, and Roman-script Hinglish.
 
-Voice and typed questions share the existing assistant path. Connecting to the backend enables merchant-scoped server recommendations; without a backend, the interface uses local demo behavior. The assistant does not execute business actions through voice.
+Voice and typed questions call the same merchant-scoped assistant and conversation-history path. The Sarvam model can use validated read-only tools for recorded sales, expenses, stock, saved Business Pulse insights, simulations, campaign draft generation, and existing Autopilot tasks. Simulations and campaign copy are not saved or executed; the assistant cannot create or edit financial records, change stock, publish or send campaigns, spend money, or execute tasks. Those write actions are not available through the assistant. When backend voice service is unavailable or microphone access is denied, type the request or use browser speech recognition where supported. If speech synthesis fails, the written response remains visible.
+
+Sarvam calls are made only from the backend. Audio is sent to Sarvam for transcription and response text may be sent for speech generation; review Sarvam's current [API terms and privacy documentation](https://docs.sarvam.ai/api-reference/introduction) before using real merchant data. The configured per-merchant assistant request limit applies to voice and typed assistant requests. Normal automated tests mock provider calls and do not use paid API requests.
+
+To verify all three live APIs with a short generated sample, set `SARVAM_API_KEY` in `backend\.env` and run this from the `backend` directory:
+
+```powershell
+python -m app.services.sarvam_smoke_test
+```
+
+This optional smoke test calls TTS, transcribes its generated MP3 with STT, and sends a short chat request. It may incur provider usage charges. No live API result is assumed unless you run it successfully with a valid key.
 
 ## Data and business logic
 
@@ -129,6 +154,7 @@ Voice and typed questions share the existing assistant path. Connecting to the b
 - Business Twin results use the assumptions entered by the user; they are scenarios, not forecasts.
 - Business insights are generated from available recorded data and deterministic thresholds. Incomplete records can produce incomplete or unavailable findings.
 - Inventory replenishment estimates require the necessary sales history, a stock count, and supplier lead-time information.
+- Backend business-day calculations and browser demo dates use `Asia/Kolkata`.
 - Campaigns are editable drafts. Action plans are checklists. UdyamAI does not send promotions, place supplier orders, process payments, or contact customers.
 
 ## API overview
@@ -141,11 +167,12 @@ Business routes are scoped to `/api/merchants/{merchant_id}` and require the mer
 | Summary and inventory | `/summary`, `/products/{product_id}/inventory`, `/inventory-risks` |
 | Business intelligence | `/intelligence/analyze`, `/insights`, `/outcomes` |
 | Business Twin | `/scenarios/calculate`, `/scenarios` |
-| Assistant | `/assistant`, `/assistant/team`, `/recommendations` |
+| Assistant | `/assistant`, `/assistant/voice`, `/assistant/team`, `/recommendations` |
 | Campaign drafts | `/campaigns/generate`, `/campaigns` |
 | Tasks and checklists | `/tasks/plan`, `/tasks`, `/tasks/history` |
 
 All routes are prefixed by `/api/merchants/{merchant_id}` unless otherwise noted in the interactive API documentation.
+The voice endpoint uses multipart form data and the same merchant bearer-token authorization as the typed assistant.
 
 ## Tests
 
@@ -156,7 +183,7 @@ cd C:\Users\shiva\UdyamAI\backend
 python -m pytest -q
 ```
 
-The test suite covers calculations, API validation, merchant scoping, record persistence, scenario handling, assistant fallback behavior, campaign drafts, task workflows, intelligence evidence, and outcomes.
+The test suite covers calculations, API validation, merchant scoping, record persistence, scenario handling, assistant fallback behavior, Sarvam request and response handling, voice upload validation, campaign drafts, task workflows, intelligence evidence, and outcomes. External Sarvam calls are mocked.
 
 ## Security and deployment notes
 

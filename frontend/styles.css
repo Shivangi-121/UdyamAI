@@ -65,4 +65,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 .voice-response{margin-top:12px;padding:12px;border:1px solid #d7e8e0;border-radius:10px;background:#fff;color:#384f4b;font-size:12px}
 .voice-response h4{margin:0 0 5px;color:var(--ink);font-size:13px}
 .voice-response p{margin:0;white-space:pre-wrap}
+.voice-duration{margin:6px 0;text-align:center;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.voice-error{margin:8px 0;color:#a34032;font-size:12px}
+#voiceAudio{width:100%;margin-top:10px}
+.voice-actions{flex-wrap:wrap}
 @media(max-width:760px){.floating-voice-button{right:16px;bottom:78px}.voice-panel{right:12px;bottom:148px;width:calc(100vw - 24px);max-height:calc(100vh - 164px)}}

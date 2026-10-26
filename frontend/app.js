@@ -11,11 +11,22 @@ let inventoryRisks = [];
 let trackedOutcomes = [];
 let insightLoading = false;
 let insightError = '';
+let conversationHistory = [];
 
 const voiceState = {
   muted: false,
   listening: false,
   recognition: null,
+  recorder: null,
+  stream: null,
+  recording: false,
+  processing: false,
+  cancelling: false,
+  recordingStartedAt: 0,
+  recordingTimer: null,
+  recordingChunks: [],
+  lastRecording: null,
+  audioUrl: null,
   supported: typeof window !== 'undefined' && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
 };
 
@@ -76,6 +87,7 @@ function applyBackendRecords(records, merchantId) {
     };
   });
   state.currentMerchantId = merchantId;
+  conversationHistory = [];
   state.name = records.merchant.name;
   state.category = records.merchant.category;
   state.products = products;
@@ -116,10 +128,7 @@ function applyBackendRecords(records, merchantId) {
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const money = value => new Intl.NumberFormat(state.language === 'hi' ? 'en-IN' : 'en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(value);
-const today = () => {
-  const date = new Date();
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-};
+const today = () => window.UdyamData.date(0);
 const total = (items, date) => items.filter(item => !date || item.date === date).reduce((sum, item) => sum + item.amount, 0);
 
 window.addEventListener('udyam:storage-error', () => showToast('Could not save your changes on this device.'));
@@ -492,9 +501,7 @@ function renderRecordedInsights() {
     ? money(sales.reduce((sum, item) => sum + item.amount - item.costOfGoods, 0))
     : 'Not enough cost details';
   const daily = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date();
-    date.setDate(date.getDate() - (6 - index));
-    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    const key = window.UdyamData.date(6 - index);
     return { key, total: sales.filter(item => item.date === key).reduce((sum, item) => sum + item.amount, 0) };
   });
   const max = Math.max(...daily.map(item => item.total), 1);
@@ -577,9 +584,7 @@ function renderDemoInsights() {
   root.querySelector('.money-card:nth-child(3) strong').textContent = product?.name || 'No product sales';
   root.querySelector('.money-card:nth-child(3) small').textContent = product ? `${best[1]} recorded units sold` : 'Choose a product when recording a sale';
   const dayTotals = Array.from({ length: 7 }, (_, index) => {
-    const day = new Date();
-    day.setDate(day.getDate() - (6 - index));
-    const key = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+    const key = window.UdyamData.date(6 - index);
     return records.filter(item => item.type === 'sale' && item.date === key).reduce((sum, item) => sum + item.amount, 0);
   });
   const max = Math.max(...dayTotals, 1);
@@ -1007,23 +1012,35 @@ function closeDialog(id) {
   document.getElementById(id).close();
 }
 
-function formatSimpleAssistant(question) {
-  return window.UdyamServices.answer(question, window.UdyamStore.current(), state.language, today());
+function formatSimpleAssistant(question, language, context) {
+  return window.UdyamServices.answer(question, window.UdyamStore.current(), language, today(), context);
+}
+
+function rememberConversation(question, result) {
+  const answer = [result?.message, ...(result?.evidence || []), ...(result?.observed_data || [])]
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 2000);
+  conversationHistory.push({ role: 'user', content: question.slice(0, 2000) });
+  if (answer) conversationHistory.push({ role: 'assistant', content: answer });
+  conversationHistory = conversationHistory.slice(-8);
 }
 
 function detectSpeechLanguage(text) {
   const raw = (text || '').trim();
   if (!raw) return state.language || 'en';
-  if (/[\u0900-\u097F]/.test(raw) || /\b(mera|mujhe|aaj|kal|kitna|kya|hai|hoga|se|ke|liye|dikhai|bikne|kamai|stock|offer|dukaan|samajh|kaisa)\b/i.test(raw)) {
+  if (/\b(?:in|speak|say|reply|respond|answer|explain)\s+(?:in\s+)?english\b/i.test(raw)) return 'en';
+  if (/\b(?:in|speak|say|reply|respond|answer|explain|simple)\s+(?:in\s+)?hindi\b|\bhindi\s+(?:mein|me)\b/i.test(raw)) return 'hi';
+  if (/[\u0900-\u097F]/.test(raw) || /\b(agar|mera|meri|mere|mujhe|aaj|kal|kitna|kitni|kya|kaun|kaise|hai|hain|hoga|batao|bataiye|samjhao|samjha|hindi|mein|se|ke|liye|dikhai|bikne|kamai|bikri|dukaan|samajh|kaisa|kaisi)\b/i.test(raw)) {
     return 'hi';
   }
-  return 'en';
+  return state.language || 'en';
 }
 
 function getVoiceLocale(text = '') {
   const raw = (text || '').trim();
   if (!raw) return (state.language || 'en') === 'hi' ? 'hi-IN' : 'en-US';
-  if (/[\u0900-\u097F]/.test(raw) || /\b(mera|mujhe|aaj|kal|kitna|kya|hai|hoga|se|ke|liye|dikhai|bikne|kamai|stock|offer|dukaan|samajh|kaisa)\b/i.test(raw)) {
+  if (/[\u0900-\u097F]/.test(raw) || /\b(agar|mera|meri|mere|mujhe|aaj|kal|kitna|kitni|kya|kaun|kaise|hai|hain|hoga|batao|bataiye|samjhao|samjha|hindi|mein|se|ke|liye|dikhai|bikne|kamai|bikri|dukaan|samajh|kaisa|kaisi)\b/i.test(raw)) {
     return 'hi-IN';
   }
   return 'en-US';
@@ -1037,6 +1054,14 @@ function setVoicePanelState(mode, message) {
   if (status) status.textContent = message || (mode === 'listening' ? 'Listening for your request' : mode === 'speaking' ? 'Speaking the answer aloud' : mode === 'processing' ? 'Processing your request' : 'Waiting for your request');
   if (mic) {
     mic.classList.toggle('is-listening', mode === 'listening');
+    mic.setAttribute(
+      'aria-label',
+      mode === 'listening'
+        ? 'Stop recording'
+        : state.language === 'hi'
+          ? 'रिकॉर्डिंग शुरू करें'
+          : 'Start recording'
+    );
   }
 }
 
@@ -1052,10 +1077,17 @@ function closeVoicePanel() {
   const panel = $('#voicePanel');
   if (!panel) return;
   panel.hidden = true;
+  if (voiceState.recorder?.state === 'recording') {
+    voiceState.cancelling = true;
+    voiceState.recorder.stop();
+  }
   if (voiceState.recognition) {
     voiceState.recognition.stop();
     voiceState.recognition = null;
   }
+  clearVoiceAudio();
+  voiceState.lastRecording = null;
+  $('#voiceRetry').disabled = true;
   voiceState.listening = false;
   $('#voiceMicButton')?.classList.remove('is-listening');
   setVoicePanelState('waiting', 'Waiting for your request');
@@ -1136,6 +1168,180 @@ function startVoiceRecognition() {
   }
 }
 
+function showVoiceError(message) {
+  const error = $('#voiceError');
+  if (!error) return;
+  error.textContent = message;
+  error.hidden = !message;
+}
+
+function releaseVoiceStream() {
+  voiceState.stream?.getTracks().forEach(track => track.stop());
+  voiceState.stream = null;
+}
+
+function startVoiceRecording() {
+  if (!window.UdyamAPI.connected()) {
+    startVoiceRecognition();
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    showVoiceError('Audio recording is not available in this browser. Type your request or connect using browser speech recognition.');
+    startVoiceRecognition();
+    return;
+  }
+  showVoiceError('');
+  $('#voiceResponse').hidden = true;
+  $('#voiceTranscript').value = '';
+  $('#voiceDuration').textContent = '00:00';
+  $('#voiceRetry').disabled = true;
+  voiceState.lastRecording = null;
+  voiceState.cancelling = false;
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+      if ($('#voicePanel').hidden) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      voiceState.stream = stream;
+      const supported = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+        .find(type => MediaRecorder.isTypeSupported?.(type));
+      const recorder = new MediaRecorder(stream, {
+        ...(supported ? { mimeType: supported } : {}),
+        audioBitsPerSecond: 128000
+      });
+      voiceState.recorder = recorder;
+      voiceState.recordingChunks = [];
+      voiceState.recordingStartedAt = Date.now();
+      voiceState.recording = true;
+      recorder.addEventListener('dataavailable', event => {
+        if (event.data.size) voiceState.recordingChunks.push(event.data);
+      });
+      recorder.addEventListener('stop', () => {
+        const chunks = voiceState.recordingChunks;
+        const mimeType = recorder.mimeType || 'audio/webm';
+        voiceState.recordingChunks = [];
+        voiceState.recorder = null;
+        voiceState.recording = false;
+        clearInterval(voiceState.recordingTimer);
+        voiceState.recordingTimer = null;
+        releaseVoiceStream();
+        $('#voiceMicButton')?.classList.remove('is-listening');
+        if (voiceState.cancelling) {
+          voiceState.cancelling = false;
+          return;
+        }
+        const recording = new Blob(chunks, { type: mimeType });
+        if (!recording.size) {
+          setVoicePanelState('waiting', 'No audio was recorded');
+          showVoiceError('No audio was captured. Check microphone permission and try again.');
+          return;
+        }
+        const extension = /mp4/i.test(mimeType) ? 'm4a' : 'webm';
+        voiceState.lastRecording = new File([recording], `recording.${extension}`, { type: mimeType });
+        $('#voiceRetry').disabled = false;
+        void submitVoiceRecording(voiceState.lastRecording);
+      });
+      recorder.start(500);
+      setVoicePanelState('listening', 'Recording… select the microphone to finish');
+      $('#voiceMicButton')?.classList.add('is-listening');
+      voiceState.recordingTimer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - voiceState.recordingStartedAt) / 1000);
+        const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
+        const seconds = String(elapsed % 60).padStart(2, '0');
+        $('#voiceDuration').textContent = `${minutes}:${seconds}`;
+        if (elapsed >= 60) stopVoiceRecording();
+      }, 250);
+    })
+    .catch(error => {
+      voiceState.recording = false;
+      releaseVoiceStream();
+      setVoicePanelState('waiting', 'Microphone unavailable');
+      const message = error.name === 'NotAllowedError'
+        ? 'Microphone access was denied. Allow microphone access or type your request.'
+        : error.name === 'NotFoundError'
+          ? 'No microphone was found. Connect a microphone or type your request.'
+          : 'Could not open the microphone. Check browser permission and try again.';
+      showVoiceError(message);
+    });
+}
+
+function stopVoiceRecording() {
+  if (voiceState.recorder?.state === 'recording') {
+    voiceState.recorder.stop();
+    setVoicePanelState('processing', 'Preparing your recording…');
+  }
+}
+
+function clearVoiceAudio() {
+  const audio = $('#voiceAudio');
+  audio.pause();
+  audio.removeAttribute('src');
+  audio.load();
+  audio.hidden = true;
+  $('#voiceStopAudio').hidden = true;
+  if (voiceState.audioUrl) URL.revokeObjectURL(voiceState.audioUrl);
+  voiceState.audioUrl = null;
+}
+
+function stopVoiceAudio() {
+  const audio = $('#voiceAudio');
+  if (!audio) return;
+  audio.pause();
+  audio.currentTime = 0;
+  $('#voiceStopAudio').hidden = true;
+  setVoicePanelState('waiting', 'Ready to listen');
+}
+
+async function submitVoiceRecording(recording) {
+  if (!recording || voiceState.processing) return;
+  voiceState.processing = true;
+  clearVoiceAudio();
+  $('#voiceMicButton').disabled = true;
+  $('#voiceSend').disabled = true;
+  $('#voiceRetry').disabled = true;
+  showVoiceError('');
+  setVoicePanelState('processing', 'Transcribing and preparing your reply…');
+  try {
+    const result = await window.UdyamAPI.askVoice({
+      audio: recording,
+      language: state.language,
+      context: conversationHistory.slice(-8),
+      speechEnabled: !voiceState.muted
+    });
+    $('#voiceTranscript').value = result.transcript;
+    $('#askInput').value = result.transcript;
+    renderAssistantReply(result.response, { speak: false });
+    rememberConversation(result.transcript, result.response);
+    if (result.speech_error) showVoiceError(result.speech_error);
+    if (result.speech_audio && result.speech_content_type) {
+      const binary = atob(result.speech_audio);
+      const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+      const audio = $('#voiceAudio');
+      if (voiceState.audioUrl) URL.revokeObjectURL(voiceState.audioUrl);
+      voiceState.audioUrl = URL.createObjectURL(new Blob([bytes], { type: result.speech_content_type }));
+      audio.src = voiceState.audioUrl;
+      audio.muted = voiceState.muted;
+      audio.hidden = false;
+      $('#voiceStopAudio').hidden = false;
+      audio.play().catch(() => {
+        showVoiceError('The reply is ready as text. Use the audio controls to play it.');
+        setVoicePanelState('waiting', 'Reply ready');
+      });
+    } else {
+      setVoicePanelState('waiting', 'Reply ready');
+    }
+  } catch (error) {
+    setVoicePanelState('waiting', 'Please try again');
+    showVoiceError(`${error.message} You can type the request below or record it again.`);
+  } finally {
+    voiceState.processing = false;
+    $('#voiceMicButton').disabled = false;
+    $('#voiceSend').disabled = false;
+    $('#voiceRetry').disabled = !voiceState.lastRecording;
+  }
+}
+
 function speakAssistantReply(text) {
   if (!text || voiceState.muted || !('speechSynthesis' in window)) return;
   if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
@@ -1165,11 +1371,21 @@ function buildSpokenResponse(result) {
   return content.slice(0, 600);
 }
 
-function renderAssistantReply(result) {
+function renderAssistantReply(result, { speak = true } = {}) {
   const reply = $('#assistantReply');
   reply.replaceChildren();
   const card = document.createElement('article');
   card.className = 'assistant-response-card';
+  if (result.source) {
+    const source = document.createElement('small');
+    source.className = 'privacy-note';
+    source.textContent = result.source === 'llm'
+      ? 'AI-generated guidance · verify important decisions against your records'
+      : result.source === 'rules'
+        ? 'Calculated from recorded business data'
+        : 'Deterministic demo response · not a live AI answer';
+    card.append(source);
+  }
   const heading = document.createElement('h3');
   heading.textContent = result.title;
   const message = document.createElement('p');
@@ -1225,7 +1441,7 @@ function renderAssistantReply(result) {
     voiceReply.hidden = false;
   }
   const spoken = buildSpokenResponse(result);
-  if (spoken) {
+  if (spoken && speak) {
     setVoicePanelState('speaking', 'Speaking reply');
     speakAssistantReply(spoken);
   }
@@ -1274,15 +1490,17 @@ function renderSquad(question) {
 }
 
 function updateTwin(remoteValues = null) {
-  const input = {
-    extraStock: Number($('#twinQuantity').value),
-    cost: Number($('#twinCost').value),
-    price: Number($('#twinPrice').value),
-    availableInventory: Number($('#twinInventory').value),
-    demandPerDay: Number($('#twinDemand').value),
-    period: Number($('#twinPeriod').value),
-    discount: Number($('#twinDiscount').value)
-  };
+  const input = readScenarioInput();
+  if (!input) {
+    $('#twinError').textContent = state.language === 'hi'
+      ? 'सभी मान जाँचें: मात्रा और अवधि पूरी संख्या हों, तथा कीमत, लागत और छूट मान्य हों।'
+      : 'Check every value: quantities and period must be whole numbers, and price, cost, and discount must be valid.';
+    $('#twinError').hidden = false;
+    $('#twinResult').hidden = true;
+    return;
+  }
+  $('#twinError').hidden = true;
+  $('#twinResult').hidden = false;
   const values = remoteValues || window.UdyamServices.compareScenario(input);
   const baseline = values.baseline.units === undefined ? {
     ...values.baseline,
@@ -1320,6 +1538,29 @@ function updateTwin(remoteValues = null) {
   $('#twinResult').dataset.proposed = JSON.stringify(proposed);
 }
 
+function readScenarioInput() {
+  const numeric = id => {
+    const field = $(`#${id}`);
+    return field.value.trim() === '' ? NaN : field.valueAsNumber;
+  };
+  const extraStock = numeric('twinQuantity');
+  const cost = numeric('twinCost');
+  const price = numeric('twinPrice');
+  const availableInventory = numeric('twinInventory');
+  const demandPerDay = numeric('twinDemand');
+  const period = numeric('twinPeriod');
+  const discount = numeric('twinDiscount');
+  const wholeNumbers = [extraStock, availableInventory, demandPerDay, period];
+  if (wholeNumbers.some(value => !Number.isSafeInteger(value) || value < 0)
+      || period < 1 || period > 90
+      || !Number.isFinite(price) || price < 0 || price > 9999999999.99
+      || !Number.isFinite(cost) || cost < 0 || cost > 9999999999.99
+      || !Number.isFinite(discount) || discount < 0 || discount > 100) {
+    return null;
+  }
+  return { extraStock, cost, price, availableInventory, demandPerDay, period, discount };
+}
+
 $$('[data-page]').forEach(button => button.addEventListener('click', () => showPage(button.dataset.page)));
 $$('.brand').forEach(link => link.addEventListener('click', event => { event.preventDefault(); showPage('home'); }));
 $('#modeSelect').addEventListener('change', event => { state.mode = event.target.value; saveState(); render(); });
@@ -1333,6 +1574,8 @@ function setLanguage(language) {
 $('#languageSelect').addEventListener('change', event => setLanguage(event.target.value));
 $('#settingsLanguage').addEventListener('change', event => setLanguage(event.target.value));
 $('#merchantSelect').addEventListener('change', event => {
+  conversationHistory = [];
+  $('#voiceResponse').hidden = true;
   if (window.UdyamAPI.connected()) {
     window.UdyamAPI.disconnect();
     $('#backendStatus').textContent = 'Disconnected because you switched merchants. Connect again with that merchant’s token.';
@@ -1374,6 +1617,8 @@ $('#connectBackend').addEventListener('click', async () => {
 
 $('#disconnectBackend').addEventListener('click', () => {
   window.UdyamAPI.disconnect();
+  conversationHistory = [];
+  $('#voiceResponse').hidden = true;
   businessInsights = [];
   inventoryRisks = [];
   trackedOutcomes = [];
@@ -1457,6 +1702,8 @@ $('#addProductButton').addEventListener('click', () => openDialog('productDialog
 $('#addProductButton2').addEventListener('click', () => openDialog('productDialog'));
 $('#startOnboarding').addEventListener('click', () => { wizardStep = 0; wizardAnswers = { business: '', products: '', tracking: '', next: '' }; renderWizard(); openDialog('onboardingDialog'); });
 function disconnectBeforeMerchantSwitch() {
+  conversationHistory = [];
+  $('#voiceResponse').hidden = true;
   if (!window.UdyamAPI.connected()) return;
   window.UdyamAPI.disconnect();
   state = window.UdyamStore.load();
@@ -1663,15 +1910,18 @@ $('#askForm').addEventListener('submit', async event => {
   event.preventDefault();
   const question = $('#askInput').value.trim();
   if (!question) return;
+  const language = detectSpeechLanguage(question);
+  const context = conversationHistory.slice(-8);
   if (!$('#voicePanel').hidden) setVoicePanelState('processing', state.language === 'hi' ? 'आपकी बात समझ रहा हूँ…' : 'Thinking through your request…');
   $('#assistantLoading').hidden = false;
   $('#askForm button[type="submit"]').disabled = true;
   $('#askInput').value = '';
   try {
     const result = window.UdyamAPI.connected()
-      ? await window.UdyamAPI.ask({ question, language: detectSpeechLanguage(question) === 'hi' ? 'hi' : 'en' })
-      : await new Promise(resolve => window.setTimeout(() => resolve(formatSimpleAssistant(question)), 280));
+      ? await window.UdyamAPI.ask({ question, language, context })
+      : await new Promise(resolve => window.setTimeout(() => resolve(formatSimpleAssistant(question, language, context)), 280));
     renderAssistantReply(result);
+    rememberConversation(question, result);
   } catch (error) {
     showToast(error.message);
     if (!$('#voicePanel').hidden) setVoicePanelState('waiting', state.language === 'hi' ? 'फिर से कोशिश करें' : 'Please try again');
@@ -1686,8 +1936,9 @@ $('#voiceInputButton').addEventListener('click', () => {
     openVoicePanel();
     return;
   }
-  if (voiceState.listening) stopVoiceRecognition();
-  else startVoiceRecognition();
+  if (voiceState.recording) stopVoiceRecording();
+  else if (voiceState.listening) stopVoiceRecognition();
+  else startVoiceRecording();
 });
 $('#floatingVoiceButton').addEventListener('click', () => {
   openVoicePanel();
@@ -1695,29 +1946,52 @@ $('#floatingVoiceButton').addEventListener('click', () => {
 });
 $('#closeVoicePanel').addEventListener('click', closeVoicePanel);
 $('#voiceMicButton').addEventListener('click', () => {
-  if (voiceState.listening) stopVoiceRecognition();
-  else startVoiceRecognition();
+  if (voiceState.recording) stopVoiceRecording();
+  else if (voiceState.listening) stopVoiceRecognition();
+  else startVoiceRecording();
 });
 $('#voiceUseText').addEventListener('click', () => {
   closeVoicePanel();
   $('#askInput').focus();
 });
 $('#voiceSend').addEventListener('click', () => {
+  if (voiceState.processing) return;
   const text = ($('#voiceTranscript').value || $('#askInput').value).trim();
   if (!text) {
     showToast(state.language === 'hi' ? 'कृपया कुछ लिखें या बोलें।' : 'Please type or speak a request first.');
     return;
   }
   $('#askInput').value = text;
+  showVoiceError('');
   stopVoiceRecognition();
+  stopVoiceAudio();
   $('#askForm').requestSubmit();
+});
+$('#voiceRetry').addEventListener('click', () => {
+  if (voiceState.lastRecording) void submitVoiceRecording(voiceState.lastRecording);
+});
+$('#voiceStopAudio').addEventListener('click', stopVoiceAudio);
+$('#voiceAudio').addEventListener('play', () => {
+  $('#voiceStopAudio').hidden = false;
+  setVoicePanelState('speaking', 'Speaking reply');
+});
+$('#voiceAudio').addEventListener('ended', () => {
+  $('#voiceStopAudio').hidden = true;
+  setVoicePanelState('waiting', 'Ready to listen');
+});
+$('#voiceAudio').addEventListener('error', () => {
+  $('#voiceStopAudio').hidden = true;
+  showVoiceError('Audio playback failed. The written reply is still available.');
+  setVoicePanelState('waiting', 'Reply ready');
 });
 $('#voiceMute').addEventListener('click', () => {
   voiceState.muted = !voiceState.muted;
+  $('#voiceAudio').muted = voiceState.muted;
   $('#voiceMute').textContent = voiceState.muted ? (state.language === 'hi' ? 'अनम्यूट' : 'Unmute') : (state.language === 'hi' ? 'म्यूट' : 'Mute');
   if (voiceState.muted) {
     window.speechSynthesis?.cancel?.();
-    setVoicePanelState('waiting', 'Listening muted');
+    stopVoiceAudio();
+    setVoicePanelState('waiting', 'Speech output muted');
   } else {
     setVoicePanelState('waiting', 'Ready to listen');
   }
@@ -1729,16 +2003,21 @@ $$ ('.question-chip').forEach(button => button.addEventListener('click', () => {
 
 $('#twinForm').addEventListener('submit', async event => {
   event.preventDefault();
+  const scenario = readScenarioInput();
+  if (!scenario) {
+    updateTwin();
+    return;
+  }
   if (window.UdyamAPI.connected()) {
     try {
       const result = await window.UdyamAPI.calculateScenario({
-        available_inventory: Number($('#twinInventory').value),
-        extra_stock: Number($('#twinQuantity').value),
-        demand_per_day: Number($('#twinDemand').value),
-        period: Number($('#twinPeriod').value),
-        price: Number($('#twinPrice').value),
-        cost: Number($('#twinCost').value),
-        discount: Number($('#twinDiscount').value)
+        available_inventory: scenario.availableInventory,
+        extra_stock: scenario.extraStock,
+        demand_per_day: scenario.demandPerDay,
+        period: scenario.period,
+        price: scenario.price,
+        cost: scenario.cost,
+        discount: scenario.discount
       });
       updateTwin(result);
     } catch (error) {
@@ -1759,14 +2038,20 @@ $('#twinProduct').addEventListener('change', () => {
   updateTwin();
 });
 $('#saveScenarioButton').addEventListener('click', async () => {
+  const scenario = readScenarioInput();
+  if (!scenario) {
+    updateTwin();
+    showToast(state.language === 'hi' ? 'पहले वैध मान भरें।' : 'Enter valid scenario values before saving.');
+    return;
+  }
   const input = {
-    available_inventory: Number($('#twinInventory').value),
-    extra_stock: Number($('#twinQuantity').value),
-    demand_per_day: Number($('#twinDemand').value),
-    period: Number($('#twinPeriod').value),
-    price: Number($('#twinPrice').value),
-    cost: Number($('#twinCost').value),
-    discount: Number($('#twinDiscount').value)
+    available_inventory: scenario.availableInventory,
+    extra_stock: scenario.extraStock,
+    demand_per_day: scenario.demandPerDay,
+    period: scenario.period,
+    price: scenario.price,
+    cost: scenario.cost,
+    discount: scenario.discount
   };
   let serverScenario = null;
   if (window.UdyamAPI.connected()) {
@@ -1778,7 +2063,7 @@ $('#saveScenarioButton').addEventListener('click', async () => {
     }
   }
   const proposed = serverScenario ? JSON.parse(serverScenario.result).proposed : JSON.parse($('#twinResult').dataset.proposed || '{}');
-  const scenario = {
+  const savedScenario = {
     id: serverScenario?.id || `scenario-${Date.now()}`,
     quantity: input.extra_stock,
     cost: input.cost,
@@ -1794,7 +2079,7 @@ $('#saveScenarioButton').addEventListener('click', async () => {
       unsold: proposed.unsold_units ?? proposed.unsold
     }
   };
-  state.scenarios.push(scenario);
+  state.scenarios.push(savedScenario);
   saveState();
   renderSavedScenarios();
   showToast(window.UdyamAPI.connected() ? 'Scenario saved to the backend.' : 'Scenario saved on this device.');

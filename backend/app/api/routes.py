@@ -1,16 +1,22 @@
+import base64
 import hmac
 import json
+import re
 import time
 from collections import defaultdict, deque
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.time import business_today
 from app.agents import coordinate_recommendation
 from app.db.session import get_db
 from app.models import (
@@ -29,6 +35,7 @@ from app.models import (
 )
 from app.schemas.api import (
     AssistantRequest,
+    ConversationTurn,
     AnalysisResult,
     BusinessInsightOut,
     CampaignCreate,
@@ -62,10 +69,12 @@ from app.schemas.api import (
     TaskCreate,
     TaskOut,
     TaskUpdate,
+    VoiceConversationOut,
 )
 from app.services.assistant import answer_question, generate_campaign
 from app.services.calculations import simulate_scenario
 from app.services.intelligence import _inventory_risks, _serialize_insight, analyze_merchant
+from app.services.sarvam import synthesize_speech, transcribe_audio
 
 router = APIRouter(prefix="/api")
 _assistant_requests: dict[str, deque[float]] = defaultdict(deque)
@@ -118,10 +127,47 @@ def rate_limit_assistant(merchant_id: str) -> None:
     window.append(now)
 
 
+def save_assistant_recommendation(db: Session, merchant_id: str, recommendation: Recommendation) -> None:
+    db.add(AIRecommendation(
+        id=str(uuid4()),
+        merchant_id=merchant_id,
+        title=recommendation.title,
+        message=recommendation.message,
+        evidence=json.dumps(recommendation.evidence),
+        source=recommendation.source,
+    ))
+    db.commit()
+
+
+def response_language_for_voice(transcript: str, detected: str | None, requested: str) -> Literal["en", "hi"]:
+    language_hint = re.search(
+        r"\b(?:simple|in|mein|me|speak|say|reply|respond|answer|explain)\s+(?:in\s+)?(hindi|english)\b"
+        r"|\b(hindi|english)\s+(?:mein|me|please)\b",
+        transcript,
+        re.IGNORECASE,
+    )
+    if language_hint:
+        return "hi" if "hindi" in language_hint.group(0).casefold() else "en"
+    if requested == "hi":
+        return "hi"
+    if re.search(
+        r"[\u0900-\u097f]|\b(mera|mujhe|aaj|kal|kitna|kitni|kya|hai|hoga|batao|bataiye|samjhao|samjha|dukaan|kamai|bikri)\b",
+        transcript,
+        re.IGNORECASE,
+    ):
+        return "hi"
+    if detected and detected.startswith("hi"):
+        return "hi"
+    if detected and detected.startswith("en"):
+        return "en"
+    return requested if requested in ("en", "hi") else "en"
+
+
 @router.get("/health", response_model=HealthOut)
 def health():
     settings = get_settings()
-    return {"status": "ok", "ai_mode": "live" if settings.llm_api_key and settings.llm_model else "demo"}
+    live_ai = bool(settings.sarvam_api_key or (settings.llm_api_key and settings.llm_model))
+    return {"status": "ok", "ai_mode": "live" if live_ai else "demo"}
 
 
 @router.get("/merchants/{merchant_id}", response_model=MerchantOut)
@@ -403,7 +449,7 @@ def inventory_history(merchant_id: str, product_id: str, db: Session = Depends(g
 @router.get("/merchants/{merchant_id}/summary", response_model=SummaryOut)
 def summary(
     merchant_id: str,
-    on: date = Query(default_factory=date.today),
+    on: date = Query(default_factory=business_today),
     db: Session = Depends(get_db),
     _: str = Depends(authorized_merchant),
 ):
@@ -482,8 +528,9 @@ def inventory_risks(
 ):
     get_merchant(db, merchant_id)
     products = list(db.scalars(select(Product).where(Product.merchant_id == merchant_id)))
-    sales = list(db.scalars(select(Sale).where(Sale.merchant_id == merchant_id, Sale.date <= date.today())))
-    return _inventory_risks(products, sales, date.today())
+    today = business_today()
+    sales = list(db.scalars(select(Sale).where(Sale.merchant_id == merchant_id, Sale.date <= today)))
+    return _inventory_risks(products, sales, today)
 
 
 def _serialize_outcome(item: RecommendationOutcome) -> dict:
@@ -621,16 +668,107 @@ async def assistant(
     get_merchant(db, merchant_id)
     rate_limit_assistant(merchant_id)
     recommendation = await answer_question(db, merchant_id, payload)
-    db.add(AIRecommendation(
-        id=str(uuid4()),
-        merchant_id=merchant_id,
-        title=recommendation.title,
-        message=recommendation.message,
-        evidence=json.dumps(recommendation.evidence),
-        source=recommendation.source,
-    ))
-    db.commit()
+    save_assistant_recommendation(db, merchant_id, recommendation)
     return recommendation
+
+
+@router.post(
+    "/merchants/{merchant_id}/assistant/voice",
+    response_model=VoiceConversationOut,
+)
+async def assistant_voice(
+    merchant_id: str,
+    audio: UploadFile = File(...),
+    language: Literal["auto", "en", "hi"] = Form(default="auto"),
+    context_json: str = Form(default="[]"),
+    speech_enabled: bool = Form(default=True),
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    get_merchant(db, merchant_id)
+    rate_limit_assistant(merchant_id)
+
+    settings = get_settings()
+    raw_content_type = (audio.content_type or "").split(";", maxsplit=1)[0].strip().lower()
+    filename = Path(audio.filename or "recording.webm").name
+    extension = Path(filename).suffix.lower()
+    allowed_types = {
+        "audio/wav", "audio/x-wav", "audio/wave", "audio/mpeg", "audio/mp3",
+        "audio/aac", "audio/aiff", "audio/ogg", "audio/opus", "audio/flac",
+        "audio/mp4", "audio/x-m4a", "audio/amr", "audio/webm", "audio/x-ms-wma",
+    }
+    extension_types = {
+        ".wav": "audio/wav", ".mp3": "audio/mpeg", ".mpga": "audio/mpeg",
+        ".aac": "audio/aac", ".aiff": "audio/aiff", ".ogg": "audio/ogg",
+        ".opus": "audio/opus", ".flac": "audio/flac", ".m4a": "audio/mp4",
+        ".mp4": "audio/mp4", ".amr": "audio/amr", ".webm": "audio/webm",
+        ".wma": "audio/x-ms-wma",
+    }
+    if raw_content_type not in allowed_types and not (
+        raw_content_type == "application/octet-stream" and extension in extension_types
+    ):
+        raise HTTPException(status_code=415, detail="Unsupported audio format.")
+    if extension not in extension_types and raw_content_type not in allowed_types:
+        raise HTTPException(status_code=415, detail="Unsupported audio format.")
+    if raw_content_type == "application/octet-stream":
+        raw_content_type = extension_types[extension]
+
+    if len(context_json) > 20_000:
+        raise HTTPException(status_code=413, detail="Conversation context is too large.")
+    try:
+        context = TypeAdapter(list[ConversationTurn]).validate_json(context_json)
+    except (ValidationError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Conversation context is invalid.") from exc
+    if len(context) > 8:
+        raise HTTPException(status_code=422, detail="Conversation context is too long.")
+
+    audio_bytes = await audio.read(settings.sarvam_max_audio_bytes + 1)
+    await audio.close()
+    if not audio_bytes:
+        raise HTTPException(status_code=422, detail="Audio recording is empty.")
+    if len(audio_bytes) > settings.sarvam_max_audio_bytes:
+        raise HTTPException(status_code=413, detail="Audio recording exceeds the configured size limit.")
+
+    transcript, detected_language = await transcribe_audio(audio_bytes, filename, raw_content_type)
+    del audio_bytes
+    if len(transcript) > 2000:
+        raise HTTPException(status_code=422, detail="The recognized transcript is too long to process.")
+    response_language = response_language_for_voice(transcript, detected_language, language)
+    recommendation = await answer_question(
+        db,
+        merchant_id,
+        AssistantRequest(question=transcript, language=response_language, context=context),
+    )
+    save_assistant_recommendation(db, merchant_id, recommendation)
+
+    speech_audio = None
+    speech_content_type = None
+    speech_error = None
+    if speech_enabled and settings.sarvam_tts_enabled:
+        spoken_text = f"{recommendation.title}. {recommendation.message}".strip()
+        if len(spoken_text) > 2500:
+            speech_error = "The reply is too long for speech playback; the text reply is available."
+        else:
+            try:
+                audio_output = await synthesize_speech(
+                    spoken_text,
+                    "hi-IN" if response_language == "hi" else "en-IN",
+                )
+                speech_audio = base64.b64encode(audio_output).decode("ascii")
+                speech_content_type = "audio/mpeg"
+            except HTTPException as exc:
+                speech_error = exc.detail
+    elif speech_enabled:
+        speech_error = "Spoken replies are disabled; the text reply is available."
+
+    return VoiceConversationOut(
+        transcript=transcript,
+        transcript_language=detected_language,
+        response=recommendation,
+        speech_audio=speech_audio,
+        speech_content_type=speech_content_type,
+        speech_error=speech_error,
+    )
 
 
 @router.post("/merchants/{merchant_id}/assistant/team", response_model=Recommendation)

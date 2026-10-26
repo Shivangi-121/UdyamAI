@@ -196,6 +196,7 @@
                 <label class="advanced-scenario-field">Offer discount (%)<input type="number" id="twinDiscount" value="0" min="0" max="100" step="1" inputmode="numeric"></label>
                 <button class="button-primary" type="submit">Show me the estimate <span aria-hidden="true">→</span></button>
               </form>
+              <p class="form-error" id="twinError" role="alert" hidden></p>
               <div class="twin-result" id="twinResult" aria-live="polite">
                 <p class="eyebrow">ESTIMATES, NOT A PROMISE · BASED ON YOUR INPUTS</p>
                 <div class="scenario-columns">
@@ -389,12 +390,17 @@
       </button>
     </div>
     <div class="voice-state" id="voiceStateLabel">Waiting for your request</div>
+    <div class="voice-duration" id="voiceDuration" aria-live="polite">00:00</div>
     <label class="sr-only" for="voiceTranscript">Voice transcript</label>
     <textarea id="voiceTranscript" rows="3" placeholder="Your spoken request will appear here."></textarea>
+    <p class="voice-error" id="voiceError" role="alert" hidden></p>
     <div class="voice-response" id="voiceResponse" role="status" aria-live="polite" hidden></div>
+    <audio id="voiceAudio" controls preload="none" hidden aria-label="UdyamAI spoken response"></audio>
     <div class="voice-actions">
       <button class="outline-button" id="voiceUseText" type="button">Use text</button>
       <button class="button-primary" id="voiceSend" type="button">Send request</button>
+      <button class="outline-button" id="voiceRetry" type="button" disabled>Retry voice request</button>
+      <button class="outline-button" id="voiceStopAudio" type="button" hidden>Stop audio</button>
       <button class="outline-button" id="voiceMute" type="button">Mute</button>
     </div>
   </div>

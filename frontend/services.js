@@ -34,9 +34,10 @@ window.UdyamServices = (() => {
     return { sales: sales.reduce((sum, item) => sum + item.amount, 0), expenses: expenses.reduce((sum, item) => sum + item.amount, 0), saleCount: sales.length };
   }
 
-  function answer(question, merchant, language, currentDate) {
+  function answer(question, merchant, language, currentDate, context = []) {
     const query = question.toLowerCase();
     const hi = language === 'hi';
+    const previousText = context.map(turn => turn.content.toLowerCase()).join(' ');
     const daySales = merchant.sales.filter(item => item.date === currentDate);
     const todayRevenue = daySales.reduce((sum, item) => sum + item.amount, 0);
     const todayCogsKnown = daySales.length > 0 && daySales.every(item => Number.isFinite(item.costOfGoods));
@@ -62,8 +63,14 @@ window.UdyamServices = (() => {
       evidence = [`${weekly.saleCount} sales · ${new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(weekly.sales)} revenue this week`, `${merchant.products.length} products on the current list`];
       nextAction = { label: hi ? 'ऑफ़र की तुलना करें' : 'Compare an offer', page: 'twin' };
     } else if (/stock|buy|order|replenish|खरीद|स्टॉक|मंगव/.test(query)) {
+      const refersToPrevious = /\b(it|its|that|this|uska|uski|uske|iska|iski|iske|wahi)\b/.test(query);
+      const referenced = refersToPrevious
+        ? merchant.products
+          .filter(product => previousText.includes(product.name.toLowerCase()))
+          .sort((a, b) => previousText.lastIndexOf(b.name.toLowerCase()) - previousText.lastIndexOf(a.name.toLowerCase()))[0]
+        : null;
       const ranked = [...merchant.products].sort((a, b) => (a.quantity ?? Infinity) - (b.quantity ?? Infinity));
-      const item = ranked[0];
+      const item = referenced || ranked[0];
       title = hi ? 'स्टॉक की अगली जाँच' : 'A stock check to start with';
       message = item
         ? (hi ? `${item.name} की मात्रा ${item.quantity === null ? 'दर्ज नहीं है' : `${item.quantity} है`}। अभी बिक्री इतिहास से भरोसेमंद ऑर्डर मात्रा नहीं निकाली जा सकती। पहले स्टॉक गिनें और हाल की बिक्री देखें।` : `${item.name} is ${item.quantity === null ? 'not counted yet' : `at ${item.quantity} in stock`}. There is not enough history to recommend a reliable order quantity. Count your stock and review recent sales first.`)

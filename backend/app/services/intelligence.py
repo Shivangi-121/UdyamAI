@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.time import business_today
 from app.models import BusinessInsight, Expense, Merchant, Product, Sale
 from app.schemas.api import InventoryRisk
 
@@ -78,7 +79,7 @@ def _inventory_risks(products: list[Product], sales: list[Sale], on: date) -> li
 
 
 def analyze_merchant(db: Session, merchant_id: str, on: date | None = None) -> dict:
-    today = on or date.today()
+    today = on or business_today()
     now = datetime.now(timezone.utc)
     trend_threshold = Decimal(str(get_settings().intelligence_change_threshold))
     products = list(db.scalars(select(Product).where(Product.merchant_id == merchant_id)))

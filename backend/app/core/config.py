@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     llm_model: str = ""
     ai_timeout_seconds: float = Field(default=15, gt=0, le=60)
     ai_requests_per_minute: int = Field(default=20, gt=0, le=600)
+    sarvam_api_key: str = ""
+    sarvam_chat_model: str = "sarvam-105b"
+    sarvam_stt_model: str = "saaras:v4"
+    sarvam_tts_model: str = "bulbul:v4-flash"
+    sarvam_tts_speaker: str = "shubh_enhi_ads"
+    sarvam_tts_enabled: bool = True
+    sarvam_max_audio_bytes: int = Field(default=5_000_000, gt=0, le=10_000_000)
     intelligence_change_threshold: float = Field(default=0.25, gt=0, le=1)
     max_request_bytes: int = Field(default=65_536, gt=0, le=1_048_576)
 
