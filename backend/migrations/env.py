@@ -5,10 +5,15 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
 from app.db.base import Base
+from app.db.session import database_url_for_settings
 from app import models  # noqa: F401
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
+database_url = database_url_for_settings(get_settings())
+config.set_main_option(
+    "sqlalchemy.url",
+    database_url.render_as_string(hide_password=False).replace("%", "%%"),
+)
 if config.config_file_name:
     fileConfig(config.config_file_name)
 target_metadata = Base.metadata

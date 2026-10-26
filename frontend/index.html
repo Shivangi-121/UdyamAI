@@ -23,8 +23,8 @@
   <script src="data.js" defer></script>
   <script src="store.js?v=20261026-auth-gate-v2" defer></script>
   <script src="services.js" defer></script>
-  <script src="api.js" defer></script>
-  <script src="app.js?v=20261026-auth-gate-v2" defer></script>
+  <script src="api.js?v=20261026-local-demo-auth-v1" defer></script>
+  <script src="app.js?v=20261026-local-demo-auth-v1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -325,9 +325,9 @@
             <div class="page-heading"><p class="eyebrow">MAKE UDYAMAI WORK FOR YOU</p><h1 id="settingsTitle">Settings</h1><p class="lead">Choose how much detail you'd like to see. You can change this any time.</p></div>
             <div class="settings-card" id="accountCard">
               <h2>Account</h2>
-              <p id="accountStatus">Use an account to sync your business profile and preferences across devices. You can continue with this local preview without signing in.</p>
-              <p class="session-expired-notice" id="sessionExpiredNotice" role="status" hidden>Your session expired. Sign in again to sync business records.</p>
-              <div class="dialog-actions"><button class="button-primary" id="accountSignIn" type="button">Sign in</button><button class="outline-button" id="accountRegister" type="button">Create account</button><button class="outline-button" id="accountSignOut" type="button" hidden>Sign out</button></div>
+              <p id="accountStatus">Create a local demo profile to continue. Your business information stays in this browser and is not synced.</p>
+              <p class="session-expired-notice" id="sessionExpiredNotice" role="status" hidden>Your demo session ended. Sign in again to continue.</p>
+              <div class="dialog-actions"><button class="button-primary" id="accountSignIn" type="button">Sign in</button><button class="outline-button" id="accountRegister" type="button">Create demo profile</button><button class="outline-button" id="accountSignOut" type="button" hidden>Sign out</button></div>
             </div>
             <form class="settings-card profile-settings" id="accountProfileForm" hidden>
               <h2>Your business profile</h2>
@@ -521,39 +521,35 @@
   <dialog id="accountDialog" class="app-dialog">
     <div class="dialog-card account-dialog">
       <p class="eyebrow">ACCOUNT ACCESS</p>
-      <label class="auth-backend-label" for="authBackendUrl">UdyamAI server address</label>
-      <input id="authBackendUrl" type="url" value="http://127.0.0.1:8001" autocomplete="url" required>
+      <p class="dialog-copy">Demo mode only: no backend or database is used. Passwords are ignored and never saved. Profiles and business records stay in this browser, are not secure, and are not synced; demo profiles share the same local business workspace.</p>
       <p class="form-error" id="authGateNotice" role="alert" hidden></p>
       <section id="signInPanel" hidden>
-        <p class="eyebrow">WELCOME BACK</p><h2>Sign in to UdyamAI</h2><p class="dialog-copy">Your account syncs your business profile and preferences.</p>
+        <p class="eyebrow">WELCOME BACK</p><h2>Sign in to your demo profile</h2><p class="dialog-copy">Use an email with a demo profile saved in this browser. Any password is accepted; it is not checked.</p>
         <form id="signInForm">
           <label for="signInEmail">Email</label><input id="signInEmail" type="email" autocomplete="username" required maxlength="320">
-          <label for="signInPassword">Password</label><input id="signInPassword" type="password" autocomplete="current-password" required maxlength="128">
+          <label for="signInPassword">Demo password (not checked)</label><input id="signInPassword" type="password" autocomplete="current-password" required maxlength="128">
           <p class="form-error" id="signInError" role="alert" hidden></p>
           <div class="dialog-actions"><button class="button-primary" type="submit">Sign in</button><button class="text-button" id="showForgotPassword" type="button">Forgot password?</button></div>
         </form>
         <button class="text-button" id="showRegister" type="button">Create an account</button>
       </section>
       <section id="registerPanel">
-        <p class="eyebrow">A GOOD PLACE TO BEGIN</p><h2>Create your account</h2><p class="dialog-copy">Create an account to get started. Your business workspace opens as soon as registration succeeds.</p>
+        <p class="eyebrow">A GOOD PLACE TO BEGIN</p><h2>Create a demo profile</h2><p class="dialog-copy">This creates a profile in this browser only. The password field is for the demo screen and is not saved or verified.</p>
         <form id="registerForm">
           <label for="registerName">Your name <span class="optional-label">Optional</span></label><input id="registerName" type="text" autocomplete="name" maxlength="120">
           <label for="registerBusiness">Business name <span class="optional-label">Optional</span></label><input id="registerBusiness" type="text" autocomplete="organization" maxlength="160">
           <label for="registerEmail">Email</label><input id="registerEmail" type="email" autocomplete="email" required maxlength="320">
-          <label for="registerPassword">Password <small>At least 12 characters</small></label><input id="registerPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128">
+          <label for="registerPassword">Demo password (not saved)</label><input id="registerPassword" type="password" autocomplete="new-password" required maxlength="128">
           <p class="form-error" id="registerError" role="alert" hidden></p>
-          <div class="dialog-actions"><button class="button-primary" type="submit">Create account</button></div>
+          <div class="dialog-actions"><button class="button-primary" type="submit">Create demo profile</button></div>
         </form>
-        <button class="text-button" id="showSignIn" type="button">Already have an account? Sign in</button>
+        <button class="text-button" id="showSignIn" type="button">Already have a demo profile? Sign in</button>
       </section>
       <section id="forgotPasswordPanel" hidden>
-        <p class="eyebrow">ACCOUNT RECOVERY</p><h2>Reset your password</h2><p class="dialog-copy">If an account exists for that email, reset instructions will be sent.</p>
-        <form id="forgotPasswordForm"><label for="resetEmail">Email</label><input id="resetEmail" type="email" autocomplete="email" required maxlength="320"><p class="form-error" id="forgotPasswordError" role="alert" hidden></p><div class="dialog-actions"><button class="button-primary" type="submit">Send reset link</button></div></form>
+        <p class="eyebrow">ACCOUNT RECOVERY</p><h2>Password recovery unavailable</h2>
+        <p class="dialog-copy">Demo passwords are not saved. To use a demo profile, return to sign in and enter its email with any password.</p>
+        <form id="forgotPasswordForm"><label for="resetEmail">Email</label><input id="resetEmail" type="email" autocomplete="email" required maxlength="320"><p class="form-error" id="forgotPasswordError" role="alert" hidden></p><div class="dialog-actions"><button class="button-primary" type="submit">Continue</button></div></form>
         <button class="text-button" id="forgotBackToSignIn" type="button">Back to sign in</button>
-      </section>
-      <section id="resetPasswordPanel" hidden>
-        <p class="eyebrow">CHOOSE A NEW PASSWORD</p><h2>Reset your password</h2>
-        <form id="resetPasswordForm"><label for="newPassword">New password <small>At least 12 characters</small></label><input id="newPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128"><p class="form-error" id="resetPasswordError" role="alert" hidden></p><div class="dialog-actions"><button class="button-primary" type="submit">Save new password</button></div></form>
       </section>
     </div>
   </dialog>

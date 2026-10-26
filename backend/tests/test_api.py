@@ -8,6 +8,34 @@ def test_health_reports_demo_mode_without_llm_credentials(client):
     assert response.json()["ai_mode"] == "demo"
 
 
+def test_database_health_runs_select_one(client):
+    response = client.get("/api/health/db")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_database_health_returns_sanitized_error(client):
+    from sqlalchemy.exc import OperationalError
+
+    from app.db.session import get_db
+
+    class UnavailableDatabase:
+        def execute(self, _statement):
+            raise OperationalError("SELECT 1", {}, Exception("sensitive connection detail"))
+
+        def rollback(self):
+            pass
+
+    def unavailable_db():
+        yield UnavailableDatabase()
+
+    client.app.dependency_overrides[get_db] = unavailable_db
+    response = client.get("/api/health/db")
+    assert response.status_code == 503
+    assert "sensitive connection detail" not in response.text
+    assert response.json()["message"] == "Database is unavailable."
+
+
 def test_api_requires_auth_and_rejects_cross_merchant_token(client, auth):
     assert client.get("/api/merchants/personal").status_code == 401
     other = client.get("/api/merchants/personal", headers={"Authorization": "Bearer dev-coconut-token"})

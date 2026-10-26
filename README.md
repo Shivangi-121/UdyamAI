@@ -75,7 +75,7 @@ python -m app.seed
 python -m uvicorn app.main:app --reload
 ```
 
-The API runs at `http://127.0.0.1:8000`. Visit `http://127.0.0.1:8000/docs` for the interactive API reference or `http://127.0.0.1:8000/api/health` for the health check.
+The API runs at `http://127.0.0.1:8000`. Visit `http://127.0.0.1:8000/docs` for the interactive API reference, `/api/health` for application status, or `/api/health/db` for database readiness.
 
 To replace only seeded sample merchants and their demo records before a fresh
 walkthrough, run `python -m app.seed --reset-demo` from `backend`. Personal
@@ -103,15 +103,19 @@ In UdyamAI, open **Settings → Connect to the backend**:
 
 The bundled `dev-personal-token`, `dev-coconut-token`, and `dev-kirana-token` values are for local development only. The frontend keeps the token in memory and clears it when the page is refreshed. Seeded demo merchants are read-only.
 
-### 4. Create an account (optional)
+### 4. Frontend-only demo sign-in
 
-Create an account on the entry screen before using the workspace; returning users can switch to **Sign in**. After successful registration or sign-in, UdyamAI opens the home screen. Account-owned business records are scoped to that account; account records are not copied into browser local storage. The onboarding flow can be resumed later and profile settings can be edited from Settings.
+The frontend account dialog uses a **local demo profile** so the static app can be deployed and explored without a backend or database. Create a profile in the browser; later sign-in accepts its email and any non-empty password. Passwords are not checked or stored. Demo profile details and business records use browser local storage, are not secure or synced, and demo profiles share the same local business workspace. Clearing site data removes them.
+
+This is not real authentication and must not be used to protect private or production data. Password recovery is unavailable in this mode. The FastAPI backend still contains account-authentication endpoints, but the frontend demo sign-in does not call them. To use server-backed account authentication later, wire the frontend to a deployed API and configure its origin, cookies, and session flow for the deployment.
+
+The onboarding flow can be resumed later and profile settings can be edited from Settings. Backend-only features such as server analytics, CSV import/export, and voice API requests require a separately deployed and connected backend.
 
 Onboarding and profile settings include business type and stage, sales channels and tracking, team size, goals, location, currency, preferred language, explanation detail, assistant interaction, notification preferences, and a Light, Dark, or System theme. The assistant receives relevant profile preferences from the server; they guide its wording and priorities but are not treated as measured business facts. Theme and language can also be changed from the existing app controls.
 
-The account API uses a short-lived bearer access token plus a rotating, HttpOnly refresh cookie protected by a CSRF token. Password recovery sends a single-use link that expires after 30 minutes. Configure SMTP to enable recovery; without SMTP, the request returns a service error. The account routes are `/api/auth/register`, `/api/auth/login`, `/api/auth/session`, `/api/auth/profile`, `/api/auth/password-reset/request`, and `/api/auth/password-reset/complete`.
+The backend account API (not used by the frontend-only demo dialog) implements a short-lived bearer access token plus a rotating, HttpOnly refresh cookie protected by a CSRF token. Backend password recovery sends a single-use link that expires after 30 minutes. Configure SMTP to enable recovery. The backend routes are `/api/auth/register`, `/api/auth/login`, `/api/auth/session`, `/api/auth/profile`, `/api/auth/password-reset/request`, and `/api/auth/password-reset/complete`.
 
-For deployment, set a unique `AUTH_SECRET_KEY` of at least 32 characters, set `APP_ENV=production`, serve the app over HTTPS, and set `CORS_ORIGINS` and `FRONTEND_URL` to the actual trusted frontend origin. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM_EMAIL` for password recovery. Run `python -m alembic upgrade head` after updating the application. Account rate limits are currently held in process memory; use a shared rate-limit store before running multiple API workers or instances.
+For deployment, set a unique `AUTH_SECRET_KEY` of at least 32 characters, set `APP_ENV=production`, serve the app over HTTPS, and set `CORS_ORIGINS` and `FRONTEND_URL` to the actual trusted frontend origin. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, and `SMTP_PASSWORD` for password recovery. Set `DATABASE_URL` only in the backend's protected environment configuration; production requires PostgreSQL and SSL. Use the connection URI copied from Supabase's **Connect** panel, and URL-encode any special characters in its password. Do not place it in frontend configuration or commit it. Run `python -m alembic upgrade head` after updating the application, then check `/api/health/db`; production startup also runs `SELECT 1` and refuses to start if the database is unavailable. Account rate limits are currently held in process memory; use a shared rate-limit store before running multiple API workers or instances.
 
 ## Configuration
 
@@ -120,7 +124,7 @@ Backend settings are read from environment variables and `backend\.env`. See [`b
 | Setting | Purpose |
 | --- | --- |
 | `APP_ENV` | Use `production` to enforce a non-development account signing secret and secure auth cookies. |
-| `DATABASE_URL` | SQLAlchemy database URL; defaults to local SQLite. |
+| `DATABASE_URL` | SQLAlchemy URL; defaults to local SQLite. Production requires PostgreSQL via psycopg and SSL. |
 | `CORS_ORIGINS` | Comma-separated frontend origins allowed to call the API. |
 | `AUTH_SECRET_KEY` | Secret used to sign account access tokens; use a unique value of at least 32 characters in production. |
 | `AUTH_ACCESS_TOKEN_MINUTES` | Account access-token lifetime (1–60 minutes). |
@@ -167,7 +171,10 @@ This optional smoke test calls TTS, transcribes its generated MP3 with STT, and 
 ## Data and business logic
 
 - Personal records can be stored in browser local storage or in the backend, depending on the selected mode.
-- SQLite is the default local database. PostgreSQL is supported through SQLAlchemy; configure `DATABASE_URL` and ensure the database is available before running migrations.
+- SQLite is the default local database. PostgreSQL uses psycopg 3. SQLAlchemy parses URL-encoded credentials; use `postgresql+psycopg://` (or a Supabase `postgresql://` URI, which the backend normalizes to psycopg 3) and require SSL for production.
+- For an always-on FastAPI host that supports IPv6, Supabase's direct database connection is suitable. If the host/network is IPv4-only, select **Session pooler** in Supabase's Connect panel and copy its URI and parameters exactly—do not guess its host or username. Session pooling suits the backend's normal persistent SQLAlchemy connection pool. For serverless runtimes that create short-lived instances, select Supabase's **Transaction pooler** instead and follow Supabase's current driver requirements; do not assume its host or credentials match the session pooler.
+- The SQLAlchemy pool uses five persistent connections with up to five overflow connections per backend process, a 30-second checkout timeout, a 30-minute recycle, and `pool_pre_ping`. Account for the total across all deployed worker processes when setting Supabase/database connection limits. Alembic uses `NullPool` and takes its URL from the same backend settings.
+- Apply schema updates from `backend` with `python -m alembic upgrade head`; inspect each pending migration before applying it to production and never reset production data. Verify connectivity with `GET /api/health/db` (or `Invoke-RestMethod http://127.0.0.1:8000/api/health/db` locally). This endpoint returns only a status and does not disclose host, credentials, or SQL errors.
 - A recorded sales total is not the same as profit. Gross profit is reported only when sale-cost information is available and does not subtract operating expenses.
 - Analytics use the authenticated merchant's sales, expenses, products, and configured stock. Revenue is the sum of recorded sale amounts; recorded expenses are summed separately; gross profit is revenue less recorded cost of goods sold; net profit is gross profit less recorded expenses and is unavailable when any sale in the selected range has missing cost. The average recorded sale is revenue divided by sale records; it is not an order-level average because the model does not group line items into orders.
 - Analytics date ranges are inclusive, limited to 366 days, and use business-record calendar dates (the app's business day is `Asia/Kolkata`). Period comparisons are shown only when recorded history reaches the full prior period and carry a reminder that bookkeeping completeness cannot be verified. Future end dates are rejected.

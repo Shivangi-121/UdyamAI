@@ -1,19 +1,41 @@
+from contextlib import asynccontextmanager
 import logging
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.core.config import get_settings
+from app.db.session import engine
 from app.services.csv_data import MAX_CSV_BYTES
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("udyamai")
 settings = get_settings()
 
-app = FastAPI(title="UdyamAI API", version="0.3.0", description="Merchant-first business records, transparent calculations, and assistant APIs.")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    if settings.app_env.lower() == "production":
+        try:
+            with engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+        except SQLAlchemyError:
+            logger.error("Production database startup check failed; verify DATABASE_URL and database availability.")
+            raise RuntimeError("Production database connectivity check failed.") from None
+    yield
+
+
+app = FastAPI(
+    title="UdyamAI API",
+    version="0.3.0",
+    description="Merchant-first business records, transparent calculations, and assistant APIs.",
+    lifespan=lifespan,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,

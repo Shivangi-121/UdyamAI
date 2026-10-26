@@ -1,6 +1,7 @@
 import base64
 import hmac
 import json
+import logging
 import re
 import secrets
 import time
@@ -15,7 +16,7 @@ from uuid import uuid4
 import jwt
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.responses import PlainTextResponse
@@ -118,6 +119,7 @@ from app.services.intelligence import _inventory_risks, _serialize_insight, anal
 from app.services.sarvam import synthesize_speech, transcribe_audio
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 _assistant_requests: dict[str, deque[float]] = defaultdict(deque)
 MAX_REPORT_DAYS = 366
 MAX_EXPORT_ROWS = 10_000
@@ -529,6 +531,20 @@ def health():
     settings = get_settings()
     live_ai = bool(settings.sarvam_api_key or (settings.llm_api_key and settings.llm_model))
     return {"status": "ok", "ai_mode": "live" if live_ai else "demo"}
+
+
+@router.get("/health/db")
+def database_health(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1")).scalar_one()
+    except SQLAlchemyError:
+        try:
+            db.rollback()
+        except SQLAlchemyError:
+            logger.warning("Database rollback after readiness check failed.")
+        logger.warning("Database readiness check failed.")
+        raise HTTPException(status_code=503, detail="Database is unavailable.") from None
+    return {"status": "ok"}
 
 
 @router.get("/merchants/{merchant_id}", response_model=MerchantOut)
