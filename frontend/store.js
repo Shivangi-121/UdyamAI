@@ -3,11 +3,13 @@ window.UdyamStore = (() => {
   const KEY = 'udyamai-preview-v2';
   const LEGACY_KEY = 'udyamai-preview-v1';
   let model;
+  const remoteMerchantIds = new Set();
 
   function freshModel() {
     return {
       mode: 'simple',
       language: 'en',
+      theme: 'system',
       currentMerchantId: 'personal',
       merchants: {
         personal: { id: 'personal', ...window.UdyamData.emptyMerchant() },
@@ -21,6 +23,7 @@ window.UdyamStore = (() => {
     if (!parsed || typeof parsed !== 'object') return fresh;
     fresh.mode = ['simple', 'smart', 'advanced'].includes(parsed.mode) ? parsed.mode : 'simple';
     fresh.language = parsed.language === 'hi' ? 'hi' : 'en';
+    fresh.theme = ['system', 'light', 'dark'].includes(parsed.theme) ? parsed.theme : 'system';
     fresh.currentMerchantId = parsed.currentMerchantId in fresh.merchants ? parsed.currentMerchantId : 'personal';
     if (parsed.merchants && typeof parsed.merchants === 'object') {
       for (const id of ['personal', 'coconut', 'kirana']) {
@@ -59,6 +62,7 @@ window.UdyamStore = (() => {
           model = freshModel();
           model.mode = ['simple', 'smart', 'advanced'].includes(previous.mode) ? previous.mode : 'simple';
           model.language = previous.language === 'hi' ? 'hi' : 'en';
+          model.theme = ['system', 'light', 'dark'].includes(previous.theme) ? previous.theme : 'system';
           model.merchants.personal = {
             ...model.merchants.personal,
             name: previous.businessName || '',
@@ -84,7 +88,10 @@ window.UdyamStore = (() => {
 
   function persist() {
     try {
-      localStorage.setItem(KEY, JSON.stringify(model));
+      const localModel = { ...model, merchants: { ...model.merchants } };
+      remoteMerchantIds.forEach(id => delete localModel.merchants[id]);
+      localModel.currentMerchantId = remoteMerchantIds.has(model.currentMerchantId) ? 'personal' : model.currentMerchantId;
+      localStorage.setItem(KEY, JSON.stringify(localModel));
       localStorage.removeItem(LEGACY_KEY);
     } catch (error) {
       console.error('Could not save UdyamAI information on this device.', error);
@@ -98,7 +105,8 @@ window.UdyamStore = (() => {
       const saved = stored ? JSON.parse(stored) : freshModel();
       saved.mode = model.mode;
       saved.language = model.language;
-      saved.currentMerchantId = model.currentMerchantId;
+      saved.theme = model.theme;
+      saved.currentMerchantId = remoteMerchantIds.has(model.currentMerchantId) ? 'personal' : model.currentMerchantId;
       localStorage.setItem(KEY, JSON.stringify(saved));
     } catch (error) {
       console.error('Could not save UdyamAI preferences on this device.', error);
@@ -141,6 +149,19 @@ window.UdyamStore = (() => {
     return model.merchants[id] || null;
   }
 
+  function attachMerchant(id, values) {
+    remoteMerchantIds.add(id);
+    if (!model.merchants[id]) {
+      model.merchants[id] = {
+        id,
+        ...window.UdyamData.emptyMerchant(),
+        name: values.name || '',
+        category: values.category || ''
+      };
+    }
+    model.currentMerchantId = id;
+  }
+
   function selectMerchant(id) {
     if (!model.merchants[id]) return false;
     model.currentMerchantId = id;
@@ -167,12 +188,14 @@ window.UdyamStore = (() => {
   }
 
   function resetPersonal() {
+    remoteMerchantIds.clear();
     model.merchants.personal = { id: 'personal', ...window.UdyamData.emptyMerchant() };
     model.mode = 'simple';
     model.language = 'en';
+    model.theme = 'system';
     model.currentMerchantId = 'personal';
     persist();
   }
 
-  return { load, save, savePreferences, current, merchant, selectMerchant, recordTransaction, updateProductStock, resetPersonal };
+  return { load, save, savePreferences, current, merchant, attachMerchant, selectMerchant, recordTransaction, updateProductStock, resetPersonal };
 })();

@@ -2,17 +2,21 @@ import base64
 import hmac
 import json
 import re
+import secrets
 import time
 from collections import defaultdict, deque
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
+import jwt
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from pydantic import TypeAdapter, ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -22,18 +26,24 @@ from app.db.session import get_db
 from app.models import (
     ActionHistory,
     AIRecommendation,
+    AuthSession,
     AutopilotTask,
     BusinessInsight,
     CampaignDraft,
     Expense,
     InventoryRecord,
     Merchant,
+    PasswordResetToken,
     Product,
     RecommendationOutcome,
     Sale,
     Scenario,
+    UserAccount,
 )
 from app.schemas.api import (
+    AccountLogin,
+    AccountRegister,
+    AuthResponse,
     AssistantRequest,
     ConversationTurn,
     AnalysisResult,
@@ -59,6 +69,10 @@ from app.schemas.api import (
     OutcomeCreate,
     OutcomeOut,
     OutcomeUpdate,
+    PasswordResetComplete,
+    PasswordResetRequest,
+    ProfileOut,
+    ProfileUpdate,
     SaleCreate,
     SaleOut,
     SaleUpdate,
@@ -70,6 +84,22 @@ from app.schemas.api import (
     TaskOut,
     TaskUpdate,
     VoiceConversationOut,
+)
+from app.services.auth import (
+    decode_access_token,
+    deliver_password_reset,
+    dummy_password_hash,
+    enforce_rate_limit,
+    get_account_for_session,
+    make_profile,
+    new_session,
+    owned_merchant,
+    password_hasher,
+    password_reset_token,
+    clear_session_cookies,
+    set_session_cookies,
+    token_digest,
+    verify_csrf,
 )
 from app.services.assistant import answer_question, generate_campaign
 from app.services.calculations import simulate_scenario
@@ -83,16 +113,39 @@ _assistant_requests: dict[str, deque[float]] = defaultdict(deque)
 def authorized_merchant(
     merchant_id: str,
     authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
 ) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Bearer token required")
     token = authorization.removeprefix("Bearer ").strip()
-    expected = get_settings().token_map.get(merchant_id)
-    if get_settings().app_env.lower() == "production" and (not expected or expected.startswith("dev-")):
-        raise HTTPException(status_code=503, detail="Production merchant credentials are not configured")
-    if not expected or not hmac.compare_digest(token, expected):
+    settings = get_settings()
+    configured_tokens = settings.token_map
+    expected = configured_tokens.get(merchant_id)
+    if expected and hmac.compare_digest(token, expected):
+        if settings.app_env.lower() == "production" and expected.startswith("dev-"):
+            raise HTTPException(status_code=503, detail="Production merchant credentials are not configured")
+        return merchant_id
+    if any(hmac.compare_digest(token, value) for value in configured_tokens.values()):
+        raise HTTPException(status_code=403, detail="Token is not authorized for this merchant")
+    claims = decode_access_token(token)
+    user, _ = get_account_for_session(db, claims)
+    merchant = db.get(Merchant, merchant_id)
+    if merchant is None:
+        raise HTTPException(status_code=404, detail="Merchant not found")
+    if merchant.owner_user_id != user.id or merchant.is_demo:
         raise HTTPException(status_code=403, detail="Token is not authorized for this merchant")
     return merchant_id
+
+
+def current_account(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+) -> UserAccount:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Sign in to continue.")
+    claims = decode_access_token(authorization.removeprefix("Bearer ").strip())
+    user, _ = get_account_for_session(db, claims)
+    return user
 
 
 def get_merchant(db: Session, merchant_id: str) -> Merchant:
@@ -161,6 +214,267 @@ def response_language_for_voice(transcript: str, detected: str | None, requested
     if detected and detected.startswith("en"):
         return "en"
     return requested if requested in ("en", "hi") else "en"
+
+
+@router.post("/auth/register", response_model=AuthResponse, status_code=201)
+def register_account(
+    payload: AccountRegister,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    enforce_rate_limit(request, "register", 5)
+    user = UserAccount(
+        id=str(uuid4()),
+        email=str(payload.email),
+        full_name=payload.full_name.strip(),
+        password_hash=password_hasher.hash(payload.password),
+    )
+    merchant = Merchant(
+        id=f"merchant-{uuid4()}",
+        name=payload.business_name.strip(),
+        category="",
+        is_demo=False,
+        owner_user_id=user.id,
+    )
+    db.add_all([user, merchant])
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if db.scalar(select(UserAccount.id).where(UserAccount.email == str(payload.email))) is not None:
+            raise HTTPException(status_code=409, detail="An account with this email already exists.") from exc
+        raise
+    access_token, refresh_token, expires_in = new_session(db, user)
+    csrf_token = secrets.token_urlsafe(32)
+    set_session_cookies(response, refresh_token, csrf_token)
+    return AuthResponse(
+        access_token=access_token,
+        expires_in=expires_in,
+        profile=make_profile(user, merchant),
+    )
+
+
+@router.post("/auth/login", response_model=AuthResponse)
+def login_account(
+    payload: AccountLogin,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    enforce_rate_limit(request, "login", 10)
+    user = db.scalar(select(UserAccount).where(UserAccount.email == str(payload.email)))
+    candidate_hash = user.password_hash if user else dummy_password_hash
+    valid_password = password_hasher.verify(payload.password, candidate_hash)
+    if user is None or not valid_password or not user.is_active:
+        raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+    merchant = owned_merchant(db, user)
+    access_token, refresh_token, expires_in = new_session(db, user)
+    csrf_token = secrets.token_urlsafe(32)
+    set_session_cookies(response, refresh_token, csrf_token)
+    return AuthResponse(
+        access_token=access_token,
+        expires_in=expires_in,
+        profile=make_profile(user, merchant),
+    )
+
+
+@router.post("/auth/session", response_model=AuthResponse)
+def refresh_session(
+    request: Request,
+    response: Response,
+    csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
+    db: Session = Depends(get_db),
+):
+    verify_csrf(request, csrf_token)
+    raw_token = request.cookies.get("udyamai_refresh")
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Your session has expired. Sign in again.")
+    session = db.scalar(select(AuthSession).where(AuthSession.refresh_token_hash == token_digest(raw_token)))
+    now = datetime.now(timezone.utc)
+    expires_at = session.expires_at.replace(tzinfo=timezone.utc) if session and session.expires_at.tzinfo is None else (session.expires_at if session else now)
+    user = db.get(UserAccount, session.user_id) if session else None
+    if session is None or user is None or not user.is_active or session.revoked_at or expires_at <= now:
+        raise HTTPException(status_code=401, detail="Your session has expired. Sign in again.")
+    merchant = owned_merchant(db, user)
+    rotated_token = secrets.token_urlsafe(48)
+    result = db.execute(
+        update(AuthSession)
+        .where(
+            AuthSession.id == session.id,
+            AuthSession.refresh_token_hash == token_digest(raw_token),
+            AuthSession.revoked_at.is_(None),
+        )
+        .values(
+            refresh_token_hash=token_digest(rotated_token),
+            expires_at=now + timedelta(days=get_settings().auth_refresh_token_days),
+        )
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=401, detail="Your session has expired. Sign in again.")
+    db.commit()
+    access_token = jwt.encode(
+        {
+            "sub": user.id,
+            "sid": session.id,
+            "typ": "access",
+            "exp": now + timedelta(minutes=get_settings().auth_access_token_minutes),
+            "iat": now,
+            "jti": secrets.token_urlsafe(16),
+        },
+        get_settings().auth_secret_key,
+        algorithm="HS256",
+    )
+    set_session_cookies(response, rotated_token, secrets.token_urlsafe(32))
+    return AuthResponse(
+        access_token=access_token,
+        expires_in=get_settings().auth_access_token_minutes * 60,
+        profile=make_profile(user, merchant),
+    )
+
+
+@router.delete("/auth/session", status_code=204)
+def logout_session(
+    request: Request,
+    response: Response,
+    csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
+    db: Session = Depends(get_db),
+):
+    verify_csrf(request, csrf_token)
+    raw_token = request.cookies.get("udyamai_refresh")
+    if raw_token:
+        session = db.scalar(select(AuthSession).where(AuthSession.refresh_token_hash == token_digest(raw_token)))
+        if session and session.revoked_at is None:
+            session.revoked_at = datetime.now().astimezone()
+            db.commit()
+    clear_session_cookies(response)
+
+
+@router.post("/auth/password-reset/request", status_code=202)
+def request_password_reset(
+    payload: PasswordResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    enforce_rate_limit(request, "password-reset", 5)
+    user = db.scalar(select(UserAccount).where(UserAccount.email == str(payload.email)))
+    reset_url = None
+    if user:
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+        ).update({PasswordResetToken.used_at: datetime.now().astimezone()}, synchronize_session=False)
+        _, token = password_reset_token(db, user)
+        reset_url = f"{get_settings().frontend_url.rstrip('/')}/?reset_token={quote(token)}"
+    try:
+        deliver_password_reset(str(payload.email), reset_url)
+        db.commit()
+    except (HTTPException, SQLAlchemyError):
+        db.rollback()
+        raise
+    return {"message": "If an account exists for this email, password reset instructions will be sent."}
+
+
+@router.post("/auth/password-reset/complete", status_code=204)
+def complete_password_reset(
+    payload: PasswordResetComplete,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    enforce_rate_limit(request, "password-reset-complete", 10)
+    record = db.scalar(select(PasswordResetToken).where(
+        PasswordResetToken.token_hash == token_digest(payload.token),
+    ))
+    if record is None:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or expired.")
+    now = datetime.now(timezone.utc)
+    expires_at = record.expires_at.replace(tzinfo=timezone.utc) if record.expires_at.tzinfo is None else record.expires_at
+    if record.used_at is not None or expires_at <= now:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or expired.")
+    claimed = db.execute(
+        update(PasswordResetToken)
+        .where(PasswordResetToken.id == record.id, PasswordResetToken.used_at.is_(None))
+        .values(used_at=now)
+    )
+    if claimed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or expired.")
+    user = db.get(UserAccount, record.user_id)
+    if user is None:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or expired.")
+    user.password_hash = password_hasher.hash(payload.password)
+    db.execute(
+        update(AuthSession)
+        .where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.get("/auth/profile", response_model=ProfileOut)
+def get_current_profile(
+    user: UserAccount = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    return make_profile(user, owned_merchant(db, user))
+
+
+@router.patch("/auth/profile", response_model=ProfileOut)
+def update_current_profile(
+    payload: ProfileUpdate,
+    user: UserAccount = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    merchant = owned_merchant(db, user)
+    fields = payload.model_fields_set
+    if "full_name" in fields and payload.full_name is not None:
+        user.full_name = payload.full_name.strip()
+    profile_fields = {
+        "business_name": "name",
+        "business_category": "category",
+        "business_model": "business_model",
+        "sales_channels": "sales_channels",
+        "business_stage": "business_stage",
+        "sales_tracking": "sales_tracking",
+        "business_size": "business_size",
+        "currency": "currency",
+        "business_location": "business_location",
+        "goals": "goals",
+        "preferred_language": "preferred_language",
+        "response_detail": "response_detail",
+        "interaction_mode": "interaction_mode",
+        "theme": "theme",
+        "notifications": "notifications",
+        "onboarding_step": "onboarding_step",
+        "onboarding_answers": "onboarding_answers",
+        "onboarding_completed": "onboarding_completed",
+    }
+    for request_field, model_field in profile_fields.items():
+        if request_field not in fields:
+            continue
+        value = getattr(payload, request_field)
+        if request_field in ("sales_channels", "goals") and value is None:
+            value = []
+        if request_field == "notifications" and value is None:
+            value = {}
+        if request_field == "business_category" and value is None:
+            value = ""
+        if request_field == "business_name" and value is None:
+            value = ""
+        if request_field == "currency" and value is None:
+            value = "INR"
+        if request_field == "onboarding_answers" and value is None:
+            value = {}
+        if value is None and request_field not in ("business_model", "business_stage", "sales_tracking", "business_size", "business_location"):
+            continue
+        setattr(merchant, model_field, value)
+    db.commit()
+    db.refresh(user)
+    db.refresh(merchant)
+    return make_profile(user, merchant)
 
 
 @router.get("/health", response_model=HealthOut)

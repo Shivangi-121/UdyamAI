@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f8f5">
   <meta name="description" content="A friendly business companion for every merchant.">
+  <script>
+    (() => {
+      try {
+        const saved = JSON.parse(localStorage.getItem('udyamai-preview-v2') || '{}');
+        const preference = ['light', 'dark', 'system'].includes(saved.theme) ? saved.theme : 'system';
+        const dark = preference === 'dark' || (preference === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+      } catch (error) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  </script>
   <title>UdyamAI — Your business, one step at a time</title>
   <link rel="stylesheet" href="styles.css">
   <script src="data.js" defer></script>
@@ -60,6 +73,7 @@
               <option value="advanced">Advanced</option>
             </select>
           </label>
+          <button class="theme-toggle" id="themeToggle" type="button" aria-label="Change color theme" title="Change color theme">◐</button>
           <button class="icon-button" data-page="settings" aria-label="Open settings">⚙</button>
         </div>
       </header>
@@ -276,13 +290,62 @@
 
           <section class="page-view" id="page-settings" aria-labelledby="settingsTitle">
             <div class="page-heading"><p class="eyebrow">MAKE UDYAMAI WORK FOR YOU</p><h1 id="settingsTitle">Settings</h1><p class="lead">Choose how much detail you'd like to see. You can change this any time.</p></div>
+            <div class="settings-card" id="accountCard">
+              <h2>Account</h2>
+              <p id="accountStatus">Use an account to sync your business profile and preferences across devices. You can continue with this local preview without signing in.</p>
+              <p class="session-expired-notice" id="sessionExpiredNotice" role="status" hidden>Your session expired. Sign in again to sync business records.</p>
+              <div class="dialog-actions"><button class="button-primary" id="accountSignIn" type="button">Sign in</button><button class="outline-button" id="accountRegister" type="button">Create account</button><button class="outline-button" id="accountSignOut" type="button" hidden>Sign out</button></div>
+            </div>
+            <form class="settings-card profile-settings" id="accountProfileForm" hidden>
+              <h2>Your business profile</h2>
+              <p>These details tailor explanations and suggestions. Optional information can be left blank.</p>
+              <label class="inline-select">Account email <input id="profileEmail" type="email" readonly></label>
+              <label class="inline-select">Your name <input id="profileFullName" type="text" maxlength="120" autocomplete="name"></label>
+              <label class="inline-select">Business name <input id="profileBusinessName" type="text" maxlength="160"></label>
+              <label class="inline-select">Business type <input id="profileCategory" type="text" maxlength="100" placeholder="For example, food shop or tailoring"></label>
+              <label class="inline-select">What do you offer?
+                <select id="profileBusinessModel"><option value="">Not set</option><option value="products">Products</option><option value="services">Services</option><option value="both">Products and services</option></select>
+              </label>
+              <fieldset class="profile-choice-group"><legend>How do customers buy from you?</legend><label><input type="checkbox" name="profileChannel" value="offline"> In person</label><label><input type="checkbox" name="profileChannel" value="online"> Online</label></fieldset>
+              <label class="inline-select">Business stage
+                <select id="profileStage"><option value="">Not set</option><option value="starting">Just starting</option><option value="operating">Already operating</option><option value="established">Established</option></select>
+              </label>
+              <label class="inline-select">How do you track sales?
+                <select id="profileSalesTracking"><option value="">Not set</option><option value="memory">I keep it in my head</option><option value="notebook">I use a notebook</option><option value="digital">I use a phone or app</option><option value="starting">I am just getting started</option></select>
+              </label>
+              <label class="inline-select">Team size <span class="optional-label">Optional range</span>
+                <select id="profileSize"><option value="">Skip</option><option value="solo">Just me</option><option value="2-5">2–5 people</option><option value="6-20">6–20 people</option><option value="21+">21 or more</option></select>
+              </label>
+              <label class="inline-select">Business currency
+                <select id="profileCurrency"><option value="INR">INR · Indian rupee</option><option value="USD">USD · US dollar</option><option value="EUR">EUR · Euro</option><option value="GBP">GBP · Pound sterling</option><option value="AED">AED · UAE dirham</option><option value="CAD">CAD · Canadian dollar</option></select>
+              </label>
+              <label class="inline-select">Business location <span class="optional-label">Optional city or region</span><input id="profileLocation" type="text" maxlength="120" autocomplete="address-level2"></label>
+              <fieldset class="profile-choice-group"><legend>What matters most to your business?</legend>
+                <label><input type="checkbox" name="profileGoal" value="sales"> Increase sales</label><label><input type="checkbox" name="profileGoal" value="margins"> Improve profit margins</label><label><input type="checkbox" name="profileGoal" value="expenses"> Control expenses</label><label><input type="checkbox" name="profileGoal" value="inventory"> Reduce stock problems</label><label><input type="checkbox" name="profileGoal" value="customers"> Attract and retain customers</label><label><input type="checkbox" name="profileGoal" value="marketing"> Improve marketing</label><label><input type="checkbox" name="profileGoal" value="performance"> Understand performance</label><label><input type="checkbox" name="profileGoal" value="automation"> Automate repetitive tasks</label>
+              </fieldset>
+              <label class="inline-select">Preferred language
+                <select id="profileLanguage"><option value="en">English</option><option value="hi">Hindi</option><option value="hinglish">Hinglish</option></select>
+              </label>
+              <label class="inline-select">Explanation detail
+                <select id="profileResponseDetail"><option value="simple">Simple and concise</option><option value="balanced">Balanced</option><option value="detailed">Detailed</option></select>
+              </label>
+              <label class="inline-select">Assistant interaction
+                <select id="profileInteraction"><option value="text">Text</option><option value="voice">Voice</option><option value="both">Text and voice</option></select>
+              </label>
+              <label class="inline-select">Color theme
+                <select id="profileTheme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select>
+              </label>
+              <fieldset class="profile-choice-group"><legend>Notifications</legend><label><input id="notifyInsights" type="checkbox"> Business insights</label><label><input id="notifyProductUpdates" type="checkbox"> Product updates</label></fieldset>
+              <p id="profileSaveStatus" role="status" aria-live="polite"></p>
+              <div class="dialog-actions"><button class="button-primary" id="saveProfile" type="submit">Save profile</button><button class="outline-button" id="resumeOnboarding" type="button">Resume onboarding</button></div>
+            </form>
             <div class="settings-card"><h2>Choose your view</h2><p>It's a preference, not a permanent label. Change it whenever you like.</p>
               <label class="mode-option"><input type="radio" name="settingsMode" value="simple"><span><strong>Simple</strong><small>Big buttons, everyday words and only the essentials.</small></span></label>
               <label class="mode-option"><input type="radio" name="settingsMode" value="smart"><span><strong>Smart</strong><small>See growth suggestions, product performance and helpful comparisons.</small></span></label>
               <label class="mode-option"><input type="radio" name="settingsMode" value="advanced"><span><strong>Advanced</strong><small>Explore detailed controls, assumptions and analysis.</small></span></label>
             </div>
-            <div class="settings-card"><h2>Explore a demo business</h2><p>Demo records are clearly marked and separate from your own information.</p><label class="inline-select">Business <select id="merchantSelect"><option value="personal">My business</option><option value="coconut">Coconut street vendor</option><option value="kirana">Kirana store</option></select></label></div>
-            <div class="settings-card"><h2>Connect to the backend</h2><p>Optional development connection. When connected, new sales, expenses, products and drafts are saved to the server. Your bearer token stays in memory until you refresh.</p>
+            <div class="settings-card" id="demoBusinessSettings"><h2>Explore a demo business</h2><p>Demo records are clearly marked and separate from your own information.</p><label class="inline-select">Business <select id="merchantSelect"><option value="personal">My business</option><option value="coconut">Coconut street vendor</option><option value="kirana">Kirana store</option></select></label></div>
+            <div class="settings-card" id="backendConnectionSettings"><h2>Connect to the backend</h2><p>Optional development connection. When connected, new sales, expenses, products and drafts are saved to the server. Your bearer token stays in memory until you refresh.</p>
               <label class="inline-select">Backend address <input id="backendUrl" type="url" value="http://127.0.0.1:8000" autocomplete="url"></label>
               <label class="inline-select">Merchant access token <input id="backendToken" type="password" autocomplete="off" placeholder="Paste a configured merchant token"></label>
               <div class="dialog-actions"><button class="button-primary" id="connectBackend" type="button">Connect and load records</button><button class="outline-button" id="disconnectBackend" type="button">Disconnect</button></div>
@@ -335,7 +398,19 @@
       <button type="button" class="dialog-close" data-close="onboardingDialog" aria-label="Close">×</button>
       <div class="wizard-progress"><span id="wizardProgressBar"></span></div>
       <p class="eyebrow" id="wizardStepLabel">A FEW EASY QUESTIONS · 1 OF 3</p><h2 id="wizardQuestion">What kind of business do you run?</h2>
+      <label class="wizard-business-name" id="wizardBusinessNameLabel" for="wizardBusinessName">Business name <span class="optional-label">Optional</span></label><input id="wizardBusinessName" type="text" maxlength="160" autocomplete="organization">
       <div id="wizardChoices" class="wizard-choices"></div>
+      <fieldset id="wizardPreferences" class="wizard-preferences" hidden>
+        <label>Preferred language<select id="wizardLanguage"><option value="en">English</option><option value="hi">Hindi</option><option value="hinglish">Hinglish</option></select></label>
+        <label>Explanation style<select id="wizardResponseDetail"><option value="simple">Simple and concise</option><option value="balanced">Balanced</option><option value="detailed">Detailed</option></select></label>
+        <label>Theme<select id="wizardTheme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+        <label>Assistant interaction<select id="wizardInteraction"><option value="text">Text</option><option value="voice">Voice</option><option value="both">Text and voice</option></select></label>
+        <label>Currency<select id="wizardCurrency"><option value="INR">INR · Indian rupee</option><option value="USD">USD · US dollar</option><option value="EUR">EUR · Euro</option><option value="GBP">GBP · Pound sterling</option><option value="AED">AED · UAE dirham</option><option value="CAD">CAD · Canadian dollar</option></select></label>
+      </fieldset>
+      <section class="wizard-summary" id="wizardSummary" hidden aria-live="polite">
+        <h3>Your profile so far</h3><p id="wizardSummaryText"></p>
+        <button type="button" class="text-button" id="editWizardAnswers">Edit answers</button>
+      </section>
       <label class="wizard-text-label" id="wizardTextLabel" for="wizardInput" hidden></label><input id="wizardInput" type="text" maxlength="100" hidden>
       <p class="form-error" id="wizardError" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" class="text-button" id="wizardBack">Back</button><button type="button" class="text-button" id="skipWizard">Skip for now</button><button class="button-primary" id="wizardNext" type="button">Next <span aria-hidden="true">→</span></button></div>
@@ -375,6 +450,42 @@
       <p class="form-error" id="inventoryError" role="alert" hidden></p>
       <div class="dialog-actions"><button type="button" class="outline-button" data-close="inventoryDialog">Not now</button><button class="button-primary" type="submit">Save count</button></div>
     </form>
+  </dialog>
+  <dialog id="accountDialog" class="app-dialog">
+    <div class="dialog-card account-dialog">
+      <button type="button" class="dialog-close" data-close="accountDialog" aria-label="Close">×</button>
+      <section id="signInPanel">
+        <p class="eyebrow">WELCOME BACK</p><h2>Sign in to UdyamAI</h2><p class="dialog-copy">Your account syncs your business profile and preferences.</p>
+        <form id="signInForm">
+          <label for="signInEmail">Email</label><input id="signInEmail" type="email" autocomplete="username" required maxlength="320">
+          <label for="signInPassword">Password</label><input id="signInPassword" type="password" autocomplete="current-password" required maxlength="128">
+          <p class="form-error" id="signInError" role="alert" hidden></p>
+          <div class="dialog-actions"><button class="button-primary" type="submit">Sign in</button><button class="text-button" id="showForgotPassword" type="button">Forgot password?</button></div>
+        </form>
+        <button class="text-button" id="showRegister" type="button">Create an account</button>
+      </section>
+      <section id="registerPanel" hidden>
+        <p class="eyebrow">A GOOD PLACE TO BEGIN</p><h2>Create your account</h2><p class="dialog-copy">Only your email and password are required. You can add business details later.</p>
+        <form id="registerForm">
+          <label for="registerName">Your name <span class="optional-label">Optional</span></label><input id="registerName" type="text" autocomplete="name" maxlength="120">
+          <label for="registerBusiness">Business name <span class="optional-label">Optional</span></label><input id="registerBusiness" type="text" autocomplete="organization" maxlength="160">
+          <label for="registerEmail">Email</label><input id="registerEmail" type="email" autocomplete="email" required maxlength="320">
+          <label for="registerPassword">Password <small>At least 12 characters</small></label><input id="registerPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128">
+          <p class="form-error" id="registerError" role="alert" hidden></p>
+          <div class="dialog-actions"><button class="button-primary" type="submit">Create account</button></div>
+        </form>
+        <button class="text-button" id="showSignIn" type="button">Already have an account? Sign in</button>
+      </section>
+      <section id="forgotPasswordPanel" hidden>
+        <p class="eyebrow">ACCOUNT RECOVERY</p><h2>Reset your password</h2><p class="dialog-copy">If an account exists for that email, reset instructions will be sent.</p>
+        <form id="forgotPasswordForm"><label for="resetEmail">Email</label><input id="resetEmail" type="email" autocomplete="email" required maxlength="320"><p class="form-error" id="forgotPasswordError" role="alert" hidden></p><div class="dialog-actions"><button class="button-primary" type="submit">Send reset link</button></div></form>
+        <button class="text-button" id="forgotBackToSignIn" type="button">Back to sign in</button>
+      </section>
+      <section id="resetPasswordPanel" hidden>
+        <p class="eyebrow">CHOOSE A NEW PASSWORD</p><h2>Reset your password</h2>
+        <form id="resetPasswordForm"><label for="newPassword">New password <small>At least 12 characters</small></label><input id="newPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="128"><p class="form-error" id="resetPasswordError" role="alert" hidden></p><div class="dialog-actions"><button class="button-primary" type="submit">Save new password</button></div></form>
+      </section>
+    </div>
   </dialog>
   <div class="voice-panel" id="voicePanel" hidden aria-live="polite">
     <div class="voice-header">

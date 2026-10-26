@@ -70,3 +70,64 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 #voiceAudio{width:100%;margin-top:10px}
 .voice-actions{flex-wrap:wrap}
 @media(max-width:760px){.floating-voice-button{right:16px;bottom:78px}.voice-panel{right:12px;bottom:148px;width:calc(100vw - 24px);max-height:calc(100vh - 164px)}}
+html[data-theme="dark"]{color-scheme:dark;--paper:#111a18;--white:#1b2724;--ink:#e9f1ed;--muted:#afbfba;--line:#34443f;--teal:#57c1b1;--teal-dark:#7bd6c6;--teal-soft:#203c36;--blue-soft:#263a48;--amber-soft:#493b24;--shadow:0 8px 28px rgba(0,0,0,.24)}
+html[data-theme="dark"] body{background:var(--paper);color:var(--ink)}
+html[data-theme="dark"] .sidebar,html[data-theme="dark"] .topbar,html[data-theme="dark"] .action-card,html[data-theme="dark"] .money-card,html[data-theme="dark"] .assistant-panel,html[data-theme="dark"] .voice-close,html[data-theme="dark"] .empty-state,html[data-theme="dark"] .insights-empty,html[data-theme="dark"] .product-row,html[data-theme="dark"] .live-insights,html[data-theme="dark"] .twin-card,html[data-theme="dark"] .estimate-grid>div,html[data-theme="dark"] .scenario-outcome,html[data-theme="dark"] .dialog-card,html[data-theme="dark"] .campaign-preview,html[data-theme="dark"] .saved-campaign,html[data-theme="dark"] .plan-card,html[data-theme="dark"] .business-pulse,html[data-theme="dark"] .pulse-card,html[data-theme="dark"] .history-panel,html[data-theme="dark"] .agent-card,html[data-theme="dark"] .voice-panel{background:var(--white);color:var(--ink);border-color:var(--line)}
+html[data-theme="dark"] .topbar{background:rgba(27,39,36,.94)}
+html[data-theme="dark"] .nav-item,html[data-theme="dark"] .nav-item>span,html[data-theme="dark"] .sidebar-label,html[data-theme="dark"] .eyebrow,html[data-theme="dark"] .money-label,html[data-theme="dark"] .privacy-note,html[data-theme="dark"] .dialog-copy,html[data-theme="dark"] .pulse-period,html[data-theme="dark"] .task-row small{color:var(--muted)}
+html[data-theme="dark"] .nav-item:hover,html[data-theme="dark"] .question-chip,html[data-theme="dark"] .advanced-product-fields,html[data-theme="dark"] .assistant-loading,html[data-theme="dark"] .assistant-reply,html[data-theme="dark"] .twin-result,html[data-theme="dark"] .pulse-confidence,html[data-theme="dark"] .voice-state{background:#263631;color:#d7e8e1}
+html[data-theme="dark"] .nav-item.active{background:var(--teal-soft);color:#a9eee0}
+html[data-theme="dark"] .help-card,html[data-theme="dark"] .creative-preview,html[data-theme="dark"] .advanced-panel,html[data-theme="dark"] .onboarding-strip{background:#202d29;border-color:var(--line);color:var(--ink)}
+html[data-theme="dark"] .help-card p,html[data-theme="dark"] .help-card strong,html[data-theme="dark"] .advanced-product-fields label,html[data-theme="dark"] .twin-form label,html[data-theme="dark"] .dialog-card>label,html[data-theme="dark"] .campaign-form label,html[data-theme="dark"] .agent-card p,html[data-theme="dark"] .saved-campaign p{color:var(--muted)}
+html[data-theme="dark"] .topbar select,html[data-theme="dark"] .inline-select select,html[data-theme="dark"] input,html[data-theme="dark"] select,html[data-theme="dark"] textarea,html[data-theme="dark"] .dialog-card select,html[data-theme="dark"] .dialog-card input,html[data-theme="dark"] .dialog-card textarea,html[data-theme="dark"] .twin-form input,html[data-theme="dark"] .campaign-form input,html[data-theme="dark"] .campaign-form select,html[data-theme="dark"] .goal-form input,html[data-theme="dark"] .settings-card input[type=text]{background:#121c19;color:var(--ink);border-color:#455851}
+html[data-theme="dark"] input::placeholder,html[data-theme="dark"] textarea::placeholder{color:#91a59d}
+html[data-theme="dark"] .transaction-row,html[data-theme="dark"] .margin-row,html[data-theme="dark"] .task-row,html[data-theme="dark"] .scenario-outcome,html[data-theme="dark"] .outcome-row,html[data-theme="dark"] .profile-choice-group{border-color:var(--line)}
+html[data-theme="dark"] .task-row,html[data-theme="dark"] .scenario-outcome,html[data-theme="dark"] .pulse-card{background:#1b2724}
+html[data-theme="dark"] .scenario-outcome.proposed,html[data-theme="dark"] .primary-action,html[data-theme="dark"] .coordinator-recommendation{background:#203c36;border-color:#385c52;color:#d8f5eb}
+html[data-theme="dark"] .pulse-card>p,html[data-theme="dark"] .assistant-response-card>p,html[data-theme="dark"] .estimate-grid strong,html[data-theme="dark"] .scenario-outcome p strong,html[data-theme="dark"] .creative-preview strong,html[data-theme="dark"] .product-row strong,html[data-theme="dark"] .task-row strong{color:var(--ink)}
+html[data-theme="dark"] .sample-notice,html[data-theme="dark"] .pulse-missing,html[data-theme="dark"] .draft-badge{background:#40351f;border-color:#66532f;color:#f0d89f}
+html[data-theme="dark"] .sample-notice button{color:#f0d89f}
+html[data-theme="dark"] .outline-button{background:#202d29;color:#a9eee0;border-color:#4b625a}
+html[data-theme="dark"] .outline-button:hover{background:#2a4039}
+html[data-theme="dark"] .theme-toggle{background:#263631;border-color:#52645e;color:#f2d68f}
+html[data-theme="dark"] .app-dialog::backdrop{background:rgba(0,0,0,.68)}
+html[data-theme="dark"] button:focus-visible,html[data-theme="dark"] input:focus-visible,html[data-theme="dark"] select:focus-visible,html[data-theme="dark"] textarea:focus-visible,html[data-theme="dark"] a:focus-visible{outline-color:#8ce2d3}
+html[data-theme="dark"] .transaction-positive{color:#83d6a8}
+html[data-theme="dark"] .transaction-negative{color:#f0a38a}
+html[data-theme="dark"] .settings-card,html[data-theme="dark"] .toast,html[data-theme="dark"] .mobile-nav,html[data-theme="dark"] .app-dialog{background:var(--white);color:var(--ink);border-color:var(--line)}
+html[data-theme="dark"] .app-dialog{box-shadow:0 18px 55px rgba(0,0,0,.45)}
+html[data-theme="dark"] .form-error,html[data-theme="dark"] .voice-error{color:#ffaaa0}
+html[data-theme="dark"] .profile-choice-group legend{color:var(--muted)}
+html[data-theme="dark"] .mobile-nav{box-shadow:0 -5px 22px rgba(0,0,0,.24)}
+html[data-theme="dark"] .toast{box-shadow:0 8px 26px rgba(0,0,0,.35)}
+html[data-theme="dark"] .app-footer{color:var(--muted)}
+html[data-theme="dark"] .money-icon.earned{background:#244832;color:#91e5ad}
+html[data-theme="dark"] .money-icon.spent{background:#4b3027;color:#f0a58a}
+html[data-theme="dark"] .money-icon.note{background:#263a48;color:#a4d6f2}
+.theme-toggle{width:38px;height:38px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--white);color:var(--teal-dark);font-size:18px;cursor:pointer}
+.theme-toggle:focus-visible{outline:3px solid #58aaa3;outline-offset:3px}
+.profile-settings{display:grid;gap:12px}
+.profile-settings h2,.profile-settings>p{margin-bottom:0}
+.profile-settings .inline-select{display:grid;gap:5px;color:var(--muted);font-size:12px}
+.profile-settings .inline-select input,.profile-settings .inline-select select{width:100%;min-height:40px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--white);color:var(--ink)}
+.profile-choice-group{display:flex;flex-wrap:wrap;gap:8px 16px;margin:4px 0 0;padding:12px;border:1px solid var(--line);border-radius:10px}
+.profile-choice-group legend{padding:0 5px;color:var(--muted);font-size:12px}
+.profile-choice-group label{display:flex;align-items:center;gap:7px;color:var(--ink);font-size:12px}
+.profile-choice-group input{accent-color:var(--teal)}
+.session-expired-notice,.form-success{color:#a95d43}
+.account-dialog{max-width:460px}
+.account-dialog form{display:grid;gap:8px}
+.account-dialog form>label{margin-top:8px;color:var(--muted);font-size:12px}
+.account-dialog form>input{width:100%;height:42px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--white);color:var(--ink)}
+.account-dialog .form-error{margin:4px 0;color:#b34838;font-size:12px}
+.account-dialog .form-success{margin:4px 0;color:#287451;font-size:12px}
+.wizard-business-name{display:block;margin-top:12px;color:var(--muted);font-size:12px}
+#wizardBusinessName{width:100%;height:40px;margin-top:5px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--white);color:var(--ink)}
+.wizard-preferences{display:grid;gap:10px;margin:12px 0 0;padding:12px;border:1px solid var(--line);border-radius:10px}
+.wizard-preferences label{display:grid;gap:5px;color:var(--muted);font-size:12px}
+.wizard-preferences select{height:38px;padding:0 8px;border:1px solid var(--line);border-radius:7px;background:var(--white);color:var(--ink)}
+.wizard-summary{margin-top:15px;padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--paper)}
+.wizard-summary h3{margin:0 0 7px;font-size:14px}
+.wizard-summary p{margin:0;color:var(--muted);font-size:12px}
+html[data-theme="dark"] .wizard-summary{background:#202d29;border-color:var(--line)}
+@media(max-width:760px){.theme-toggle{width:36px;height:36px}.profile-settings{padding:17px}.profile-choice-group{gap:10px}.account-dialog{max-height:calc(100vh - 24px);overflow:auto}}

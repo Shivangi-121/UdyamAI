@@ -10,6 +10,15 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "sqlite:///./udyamai.db"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    auth_secret_key: str = "dev-auth-secret-change-before-deployment"
+    auth_access_token_minutes: int = Field(default=15, gt=0, le=60)
+    auth_refresh_token_days: int = Field(default=30, gt=0, le=90)
+    frontend_url: str = "http://localhost:5173"
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = ""
     merchant_tokens: str = '{"personal":"dev-personal-token","coconut":"dev-coconut-token","kirana":"dev-kirana-token"}'
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
@@ -29,6 +38,12 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_merchant_tokens(self):
         self.token_map
+        if self.app_env.lower() == "production" and (
+            len(self.auth_secret_key) < 32
+            or self.auth_secret_key.startswith("dev-")
+            or self.auth_secret_key == "dev-auth-secret-change-before-deployment"
+        ):
+            raise ValueError("Configure a unique AUTH_SECRET_KEY of at least 32 characters in production")
         return self
 
     @property

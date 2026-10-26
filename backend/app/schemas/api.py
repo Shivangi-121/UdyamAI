@@ -1,8 +1,8 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 DateValue = date
 
@@ -22,6 +22,125 @@ class MerchantOut(ORMModel):
     category: str
     is_demo: bool
     created_at: datetime
+
+
+class AccountRegister(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=12, max_length=128)
+    full_name: str = Field(default="", max_length=120)
+    business_name: str = Field(default="", max_length=160)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().casefold()
+
+
+class AccountLogin(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().casefold()
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().casefold()
+
+
+class PasswordResetComplete(BaseModel):
+    token: str = Field(min_length=32, max_length=200)
+    password: str = Field(min_length=12, max_length=128)
+
+
+class ProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: str | None = Field(default=None, max_length=120)
+    business_name: str | None = Field(default=None, max_length=160)
+    business_category: str | None = Field(default=None, max_length=100)
+    business_model: Literal["products", "services", "both"] | None = None
+    sales_channels: list[Literal["online", "offline"]] | None = Field(default=None, max_length=2)
+    business_stage: Literal["starting", "operating", "established"] | None = None
+    sales_tracking: Literal["memory", "notebook", "digital", "starting"] | None = None
+    business_size: Literal["solo", "2-5", "6-20", "21+"] | None = None
+    currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    business_location: str | None = Field(default=None, max_length=120)
+    goals: list[Literal[
+        "sales", "margins", "expenses", "inventory", "customers", "marketing", "performance", "automation"
+    ]] | None = Field(default=None, max_length=8)
+    preferred_language: Literal["en", "hi", "hinglish"] | None = None
+    response_detail: Literal["simple", "balanced", "detailed"] | None = None
+    interaction_mode: Literal["text", "voice", "both"] | None = None
+    theme: Literal["system", "light", "dark"] | None = None
+    notifications: dict[str, bool] | None = None
+    onboarding_step: int | None = Field(default=None, ge=0, le=8)
+    onboarding_answers: dict[str, str | list[str]] | None = None
+    onboarding_completed: bool | None = None
+
+    @field_validator("sales_channels", "goals")
+    @classmethod
+    def reject_duplicates(cls, value):
+        if value is not None and len(value) != len(set(value)):
+            raise ValueError("Duplicate values are not allowed")
+        return value
+
+    @field_validator("notifications")
+    @classmethod
+    def validate_notifications(cls, value):
+        if value is not None and not set(value).issubset({"business_insights", "product_updates"}):
+            raise ValueError("Unsupported notification preference")
+        return value
+
+    @field_validator("onboarding_answers")
+    @classmethod
+    def validate_onboarding_answers(cls, value):
+        allowed = {
+            "business", "businessName", "businessModel", "channels", "stage", "tracking", "goals", "next", "products",
+            "preferredLanguage", "responseDetail", "theme", "interactionMode", "currency",
+        }
+        if value is not None and not set(value).issubset(allowed):
+            raise ValueError("Unsupported onboarding answer")
+        return value
+
+
+class ProfileOut(BaseModel):
+    id: str
+    email: EmailStr
+    full_name: str
+    merchant_id: str
+    business_name: str
+    business_category: str
+    business_model: str | None
+    sales_channels: list[str]
+    business_stage: str | None
+    sales_tracking: str | None
+    business_size: str | None
+    currency: str
+    business_location: str | None
+    goals: list[str]
+    preferred_language: str
+    response_detail: str
+    interaction_mode: str
+    theme: str
+    notifications: dict[str, bool]
+    onboarding_step: int
+    onboarding_answers: dict[str, Any]
+    onboarding_completed: bool
+
+
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+    profile: ProfileOut
 
 
 class ProductCreate(BaseModel):

@@ -103,14 +103,32 @@ In UdyamAI, open **Settings → Connect to the backend**:
 
 The bundled `dev-personal-token`, `dev-coconut-token`, and `dev-kirana-token` values are for local development only. The frontend keeps the token in memory and clears it when the page is refreshed. Seeded demo merchants are read-only.
 
+### 4. Create an account (optional)
+
+Use **Create account** or **Sign in** in Settings to save a business profile and its preferences in the backend. Account-owned business records are scoped to that account; legacy merchant-token connections and the browser-local preview remain available. Account records are not copied into browser local storage. After sign-in, the onboarding flow can be resumed later and profile settings can be edited from Settings.
+
+Onboarding and profile settings include business type and stage, sales channels and tracking, team size, goals, location, currency, preferred language, explanation detail, assistant interaction, notification preferences, and a Light, Dark, or System theme. The assistant receives relevant profile preferences from the server; they guide its wording and priorities but are not treated as measured business facts. Theme and language can also be changed from the existing app controls.
+
+The account API uses a short-lived bearer access token plus a rotating, HttpOnly refresh cookie protected by a CSRF token. Password recovery sends a single-use link that expires after 30 minutes. Configure SMTP to enable recovery; without SMTP, the request returns a service error. The account routes are `/api/auth/register`, `/api/auth/login`, `/api/auth/session`, `/api/auth/profile`, `/api/auth/password-reset/request`, and `/api/auth/password-reset/complete`.
+
+For deployment, set a unique `AUTH_SECRET_KEY` of at least 32 characters, set `APP_ENV=production`, serve the app over HTTPS, and set `CORS_ORIGINS` and `FRONTEND_URL` to the actual trusted frontend origin. Configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `SMTP_FROM_EMAIL` for password recovery. Run `python -m alembic upgrade head` after updating the application. Account rate limits are currently held in process memory; use a shared rate-limit store before running multiple API workers or instances.
+
 ## Configuration
 
 Backend settings are read from environment variables and `backend\.env`. See [`backend/.env.example`](./backend/.env.example).
 
 | Setting | Purpose |
 | --- | --- |
+| `APP_ENV` | Use `production` to enforce a non-development account signing secret and secure auth cookies. |
 | `DATABASE_URL` | SQLAlchemy database URL; defaults to local SQLite. |
 | `CORS_ORIGINS` | Comma-separated frontend origins allowed to call the API. |
+| `AUTH_SECRET_KEY` | Secret used to sign account access tokens; use a unique value of at least 32 characters in production. |
+| `AUTH_ACCESS_TOKEN_MINUTES` | Account access-token lifetime (1–60 minutes). |
+| `AUTH_REFRESH_TOKEN_DAYS` | Refresh-session lifetime (1–90 days). |
+| `FRONTEND_URL` | Trusted frontend base URL used to create password-reset links. |
+| `SMTP_HOST`, `SMTP_PORT` | TLS-enabled SMTP server for password recovery. |
+| `SMTP_USERNAME`, `SMTP_PASSWORD` | Optional SMTP authentication credentials. |
+| `SMTP_FROM_EMAIL` | Sender address for recovery messages. |
 | `MERCHANT_TOKENS` | JSON map of merchant IDs to distinct bearer tokens. |
 | `LLM_BASE_URL` | Base URL for an OpenAI-compatible chat-completions API. |
 | `LLM_API_KEY` | Backend-only provider credential. |
@@ -173,6 +191,7 @@ Business routes are scoped to `/api/merchants/{merchant_id}` and require the mer
 
 All routes are prefixed by `/api/merchants/{merchant_id}` unless otherwise noted in the interactive API documentation.
 The voice endpoint uses multipart form data and the same merchant bearer-token authorization as the typed assistant.
+Account routes are under `/api/auth`; registration, login, and refresh return an access token and profile, while refresh/logout use the cookie and CSRF header. `GET` and `PATCH /api/auth/profile` read and update the authenticated account's business profile and preferences.
 
 ## Tests
 
@@ -187,12 +206,12 @@ The test suite covers calculations, API validation, merchant scoping, record per
 
 ## Security and deployment notes
 
-The included token map is a local development foundation, not a production identity system. Before deploying for real merchants:
+The account and merchant-token flows are a starting point, not a complete production identity and operations program. Before deploying for real merchants:
 
-- Replace all development tokens with strong, unique credentials and establish secure provisioning and rotation.
-- Integrate a production-grade identity provider and enforce tenant isolation.
+- Configure a unique production auth secret, replace development merchant tokens, and establish secure credential provisioning and rotation.
+- Assess account recovery, abuse monitoring, and tenant isolation against the deployment's requirements.
 - Serve the application over HTTPS and configure CORS to allow only trusted origins.
 - Store provider credentials and database secrets in a managed secret store or protected environment configuration.
-- Add production-appropriate rate limiting, monitoring, backups, and operational controls.
+- Replace the process-local account rate limiter with shared storage when running multiple workers or instances; add production-appropriate monitoring, backups, and operational controls.
 
 UdyamAI is a development project and does not provide accounting, tax, financial, or demand-forecasting guarantees.

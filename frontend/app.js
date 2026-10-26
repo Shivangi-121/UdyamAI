@@ -1,6 +1,11 @@
 let state = window.UdyamStore.load();
 let wizardStep = 0;
-let wizardAnswers = { business: '', products: '', tracking: '', next: '' };
+let wizardAnswers = {
+  business: '', businessName: '', businessModel: '', channels: [], stage: '', goals: [],
+  products: '', tracking: '', next: '',
+  preferredLanguage: 'en', responseDetail: 'balanced', theme: 'system',
+  interactionMode: 'both', currency: 'INR'
+};
 let showAllTransactions = false;
 let pendingPlan = [];
 let scenarioMerchantId = '';
@@ -12,6 +17,11 @@ let trackedOutcomes = [];
 let insightLoading = false;
 let insightError = '';
 let conversationHistory = [];
+let accountProfile = window.UdyamAPI.profile();
+let pendingResetToken = new URLSearchParams(window.location.search).get('reset_token');
+if (pendingResetToken) {
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.hash}`);
+}
 
 const voiceState = {
   muted: false,
@@ -35,7 +45,81 @@ function saveState() {
   else window.UdyamStore.save();
 }
 
+function applyTheme(theme = state.theme) {
+  state.theme = ['light', 'dark', 'system'].includes(theme) ? theme : 'system';
+  const dark = state.theme === 'dark'
+    || (state.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+  const toggle = $('#themeToggle');
+  if (toggle) {
+    toggle.textContent = dark ? '☀' : '◐';
+    toggle.title = `Color theme: ${state.theme}`;
+    toggle.setAttribute('aria-label', `Color theme is ${state.theme}; change theme`);
+  }
+}
+
+function applyAccountProfile(profile) {
+  accountProfile = profile || null;
+  if (!accountProfile) return;
+  state.language = accountProfile.preferred_language === 'en' ? 'en' : 'hi';
+  state.mode = accountProfile.response_detail === 'simple'
+    ? 'simple'
+    : accountProfile.response_detail === 'detailed' ? 'advanced' : 'smart';
+  state.theme = accountProfile.theme || 'system';
+  state.name = accountProfile.business_name || '';
+  state.category = accountProfile.business_category || '';
+  applyTheme(state.theme);
+  fillProfileForm();
+}
+
+function fillProfileForm() {
+  if (!accountProfile || !$('#accountProfileForm')) return;
+  $('#accountProfileForm').hidden = !window.UdyamAPI.authenticated();
+  $('#profileEmail').value = accountProfile.email || '';
+  $('#profileFullName').value = accountProfile.full_name || '';
+  $('#profileBusinessName').value = accountProfile.business_name || '';
+  $('#profileCategory').value = accountProfile.business_category || '';
+  $('#profileBusinessModel').value = accountProfile.business_model || '';
+  $('#profileStage').value = accountProfile.business_stage || '';
+  $('#profileSalesTracking').value = accountProfile.sales_tracking || '';
+  $('#profileSize').value = accountProfile.business_size || '';
+  $('#profileCurrency').value = accountProfile.currency || 'INR';
+  $('#profileLocation').value = accountProfile.business_location || '';
+  $('#profileLanguage').value = accountProfile.preferred_language || 'en';
+  $('#profileResponseDetail').value = accountProfile.response_detail || 'balanced';
+  $('#profileInteraction').value = accountProfile.interaction_mode || 'both';
+  $('#profileTheme').value = accountProfile.theme || 'system';
+  $$('input[name="profileChannel"]').forEach(input => {
+    input.checked = (accountProfile.sales_channels || []).includes(input.value);
+  });
+  $$('input[name="profileGoal"]').forEach(input => {
+    input.checked = (accountProfile.goals || []).includes(input.value);
+  });
+  $('#notifyInsights').checked = Boolean(accountProfile.notifications?.business_insights);
+  $('#notifyProductUpdates').checked = Boolean(accountProfile.notifications?.product_updates);
+}
+
+async function saveAccountProfile(payload, status = null) {
+  if (!window.UdyamAPI.authenticated()) return;
+  if (status) status.textContent = 'Saving…';
+  try {
+    const profile = await window.UdyamAPI.updateProfile(payload);
+    applyAccountProfile(profile);
+    saveState();
+    render();
+    if (status) status.textContent = 'Saved to your account.';
+  } catch (error) {
+    if (status) status.textContent = `Could not save: ${error.message}`;
+    throw error;
+  }
+}
+
 function applyBackendRecords(records, merchantId) {
+  if (window.UdyamAPI.authenticated()) {
+    window.UdyamStore.attachMerchant(merchantId, records.merchant);
+    if (records.profile) applyAccountProfile(records.profile);
+  }
   const products = records.products.map(product => ({
     id: product.id,
     name: product.name,
@@ -127,7 +211,11 @@ function applyBackendRecords(records, merchantId) {
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-const money = value => new Intl.NumberFormat(state.language === 'hi' ? 'en-IN' : 'en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(value);
+const money = value => new Intl.NumberFormat(state.language === 'hi' ? 'en-IN' : 'en-IN', {
+  style: 'currency',
+  currency: accountProfile?.currency || 'INR',
+  maximumFractionDigits: 2
+}).format(value);
 const today = () => window.UdyamData.date(0);
 const total = (items, date) => items.filter(item => !date || item.date === date).reduce((sum, item) => sum + item.amount, 0);
 
@@ -163,8 +251,21 @@ function renderBusinessPulse() {
     status.textContent = 'Checking recent sales, expenses and stock records…';
     return;
   }
+  const goalKinds = {
+    sales: ['sales_trend'],
+    margins: ['low_margin'],
+    expenses: ['expense_change'],
+    inventory: ['inventory_risk'],
+    performance: ['sales_trend', 'expense_change', 'low_margin', 'inventory_risk']
+  };
+  const priorities = accountProfile?.goals || [];
   const visible = businessInsights
     .filter(item => item.status !== 'dismissed')
+    .sort((left, right) => {
+      const rank = item => (priorities.some(goal => goalKinds[goal]?.includes(item.kind)) ? 20 : 0)
+        + Number(item.priority || 0);
+      return rank(right) - rank(left);
+    })
     .slice(0, state.mode === 'simple' ? 2 : state.mode === 'smart' ? 3 : 5);
   const unread = businessInsights.filter(item => item.status === 'unread').length;
   status.textContent = visible.length
@@ -399,6 +500,20 @@ function investigateInsight(insight) {
 
 function render() {
   document.documentElement.lang = state.language;
+  applyTheme(state.theme);
+  if ($('#accountStatus')) {
+    $('#accountStatus').textContent = window.UdyamAPI.authenticated()
+      ? `Signed in as ${accountProfile?.email || 'your account'}. Your business profile and preferences sync with your account.`
+      : 'Use an account to sync your business profile and preferences across devices. You can continue with this local preview without signing in.';
+    $('#accountSignIn').hidden = window.UdyamAPI.authenticated();
+    $('#accountRegister').hidden = window.UdyamAPI.authenticated();
+    $('#accountSignOut').hidden = !window.UdyamAPI.authenticated();
+    $('#accountProfileForm').hidden = !window.UdyamAPI.authenticated();
+    $('#demoBusinessSettings').hidden = window.UdyamAPI.authenticated();
+    $('#backendConnectionSettings').hidden = window.UdyamAPI.authenticated();
+    $('#resetButton').disabled = window.UdyamAPI.authenticated();
+    if (window.UdyamAPI.authenticated()) fillProfileForm();
+  }
   if ($('#dataStorageNote')) {
     $('#dataStorageNote').textContent = window.UdyamAPI.connected()
       ? 'Backend connected · your original local records remain separate.'
@@ -428,6 +543,7 @@ function render() {
   $('#languageSelect').value = state.language;
   $('#settingsLanguage').value = state.language;
   $('#merchantSelect').value = state.currentMerchantId;
+  if ($('#profileTheme')) $('#profileTheme').value = state.theme;
   $$('input[name="settingsMode"]').forEach(input => { input.checked = input.value === state.mode; });
   const hasRecords = state.sales.length > 0 || state.expenses.length > 0;
   $('#firstSteps').hidden = state.sample;
@@ -445,6 +561,9 @@ function render() {
   $('#profileCategory').textContent = state.sample ? `${state.category} · Demo` : state.category || 'Getting started';
   $('#expenseShortcut').hidden = state.mode === 'advanced';
   $('#stockShortcut').hidden = state.mode === 'advanced';
+  const serviceOnly = accountProfile?.business_model === 'services';
+  $$('.nav-item[data-page="stock"], .mobile-nav [data-page="stock"]').forEach(item => { item.hidden = serviceOnly; });
+  $('#stockShortcut').hidden = $('#stockShortcut').hidden || serviceOnly;
   const nextTask = state.tasks.find(task => !task.completed);
   $('#taskReminder').hidden = !nextTask;
   $('#reminderTitle').textContent = nextTask?.title || '';
@@ -1563,16 +1682,226 @@ function readScenarioInput() {
 
 $$('[data-page]').forEach(button => button.addEventListener('click', () => showPage(button.dataset.page)));
 $$('.brand').forEach(link => link.addEventListener('click', event => { event.preventDefault(); showPage('home'); }));
-$('#modeSelect').addEventListener('change', event => { state.mode = event.target.value; saveState(); render(); });
-$$('input[name="settingsMode"]').forEach(input => input.addEventListener('change', () => { state.mode = input.value; saveState(); render(); }));
+function setResponseDetail(mode) {
+  state.mode = mode;
+  saveState();
+  render();
+  if (window.UdyamAPI.authenticated()) {
+    const detail = mode === 'simple' ? 'simple' : mode === 'advanced' ? 'detailed' : 'balanced';
+    void saveAccountProfile({ response_detail: detail }).catch(error => {
+      showToast(`Could not sync this preference: ${error.message}`);
+    });
+  }
+}
+$('#modeSelect').addEventListener('change', event => setResponseDetail(event.target.value));
+$$('input[name="settingsMode"]').forEach(input => input.addEventListener('change', () => setResponseDetail(input.value)));
 function setLanguage(language) {
   state.language = language;
   saveState();
   render();
   showToast(language === 'hi' ? 'भाषा बदल दी गई।' : 'Language updated.');
+  if (window.UdyamAPI.authenticated()) {
+    void saveAccountProfile({ preferred_language: language }).catch(error => {
+      showToast(`Could not sync this preference: ${error.message}`);
+    });
+  }
 }
 $('#languageSelect').addEventListener('change', event => setLanguage(event.target.value));
 $('#settingsLanguage').addEventListener('change', event => setLanguage(event.target.value));
+function setTheme(theme) {
+  state.theme = theme;
+  applyTheme(theme);
+  saveState();
+  if (window.UdyamAPI.authenticated()) {
+    void saveAccountProfile({ theme }).catch(error => {
+      showToast(`Could not sync this theme: ${error.message}`);
+    });
+  }
+}
+$('#themeToggle').addEventListener('click', () => {
+  const themes = ['system', 'light', 'dark'];
+  setTheme(themes[(themes.indexOf(state.theme) + 1) % themes.length]);
+});
+$('#profileTheme').addEventListener('change', event => setTheme(event.target.value));
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (state.theme === 'system') applyTheme('system');
+});
+
+$('#accountSignIn').addEventListener('click', () => showAccountDialog('signInPanel'));
+$('#accountRegister').addEventListener('click', () => showAccountDialog('registerPanel'));
+$('#showRegister').addEventListener('click', () => showAccountDialog('registerPanel'));
+$('#showSignIn').addEventListener('click', () => showAccountDialog('signInPanel'));
+$('#showForgotPassword').addEventListener('click', () => showAccountDialog('forgotPasswordPanel'));
+$('#forgotBackToSignIn').addEventListener('click', () => showAccountDialog('signInPanel'));
+function showAccountDialog(panelId) {
+  ['signInPanel', 'registerPanel', 'forgotPasswordPanel', 'resetPasswordPanel'].forEach(id => {
+    $(`#${id}`).hidden = id !== panelId;
+  });
+  openDialog('accountDialog');
+}
+
+function showFormError(selector, message) {
+  const element = $(selector);
+  element.textContent = message;
+  element.hidden = !message;
+}
+
+function connectAccountRecords(records) {
+  backendAiMode = records.status.ai_mode;
+  const savedAnswers = records.profile.onboarding_answers || {};
+  wizardAnswers = {
+    ...wizardAnswers,
+    ...savedAnswers,
+    business: savedAnswers.business || records.profile.business_category || '',
+    businessName: savedAnswers.businessName || records.profile.business_name || '',
+    businessModel: savedAnswers.businessModel || records.profile.business_model || '',
+    channels: savedAnswers.channels || records.profile.sales_channels || [],
+    stage: savedAnswers.stage || records.profile.business_stage || '',
+    tracking: savedAnswers.tracking || records.profile.sales_tracking || '',
+    goals: savedAnswers.goals || records.profile.goals || [],
+    preferredLanguage: savedAnswers.preferredLanguage || records.profile.preferred_language || 'en',
+    responseDetail: savedAnswers.responseDetail || records.profile.response_detail || 'balanced',
+    theme: savedAnswers.theme || records.profile.theme || 'system',
+    interactionMode: savedAnswers.interactionMode || records.profile.interaction_mode || 'both',
+    currency: savedAnswers.currency || records.profile.currency || 'INR'
+  };
+  applyBackendRecords(records, records.profile.merchant_id);
+  $('#sessionExpiredNotice').hidden = true;
+  closeDialog('accountDialog');
+  $('#accountDialog').querySelectorAll('form').forEach(form => form.reset());
+  if (!records.profile.onboarding_completed) {
+    wizardStep = Math.min(records.profile.onboarding_step || 0, wizardQuestions.length - 1);
+    renderWizard();
+    openDialog('onboardingDialog');
+  }
+}
+
+$('#signInForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  showFormError('#signInError', '');
+  try {
+    const records = await window.UdyamAPI.signIn(
+      $('#backendUrl').value.trim(),
+      $('#signInEmail').value.trim(),
+      $('#signInPassword').value
+    );
+    connectAccountRecords(records);
+    showToast('You are signed in. Your business records are loaded.');
+  } catch (error) {
+    showFormError('#signInError', error.message);
+  }
+});
+
+$('#registerForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  showFormError('#registerError', '');
+  try {
+    const records = await window.UdyamAPI.register($('#backendUrl').value.trim(), {
+      email: $('#registerEmail').value.trim(),
+      password: $('#registerPassword').value,
+      full_name: $('#registerName').value.trim(),
+      business_name: $('#registerBusiness').value.trim()
+    });
+    connectAccountRecords(records);
+    showToast('Account created. You can complete your business profile at your own pace.');
+  } catch (error) {
+    showFormError('#registerError', error.message);
+  }
+});
+
+$('#forgotPasswordForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  showFormError('#forgotPasswordError', '');
+  try {
+    await window.UdyamAPI.requestPasswordReset($('#backendUrl').value.trim(), $('#resetEmail').value.trim());
+    showFormError('#forgotPasswordError', 'If an account exists for this email, instructions will be sent shortly.');
+    $('#forgotPasswordError').classList.remove('form-error');
+    $('#forgotPasswordError').classList.add('form-success');
+  } catch (error) {
+    showFormError('#forgotPasswordError', error.message);
+  }
+});
+
+$('#resetPasswordForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  showFormError('#resetPasswordError', '');
+  try {
+    await window.UdyamAPI.completePasswordReset(
+      $('#backendUrl').value.trim(),
+      pendingResetToken || '',
+      $('#newPassword').value
+    );
+    pendingResetToken = null;
+    $('#newPassword').value = '';
+    showToast('Password updated. Sign in with your new password.');
+    showAccountDialog('signInPanel');
+  } catch (error) {
+    showFormError('#resetPasswordError', error.message);
+  }
+});
+
+$('#accountSignOut').addEventListener('click', async () => {
+  let signOutError = null;
+  try {
+    await window.UdyamAPI.signOut();
+  } catch (error) {
+    signOutError = error;
+  }
+  accountProfile = null;
+  window.UdyamStore.selectMerchant('personal');
+  state = window.UdyamStore.load();
+  showAllTransactions = false;
+  render();
+  if (signOutError) showToast(`Signed out on this device, but the server could not revoke the session: ${signOutError.message}`);
+  else showToast('You have signed out. Your local preview remains available.');
+});
+
+$('#accountProfileForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  const status = $('#profileSaveStatus');
+  const payload = {
+    full_name: $('#profileFullName').value.trim(),
+    business_name: $('#profileBusinessName').value.trim(),
+    business_category: $('#profileCategory').value.trim(),
+    business_model: $('#profileBusinessModel').value || null,
+    sales_channels: $$('input[name="profileChannel"]:checked').map(input => input.value),
+    business_stage: $('#profileStage').value || null,
+    sales_tracking: $('#profileSalesTracking').value || null,
+    business_size: $('#profileSize').value || null,
+    currency: $('#profileCurrency').value,
+    business_location: $('#profileLocation').value.trim() || null,
+    goals: $$('input[name="profileGoal"]:checked').map(input => input.value),
+    preferred_language: $('#profileLanguage').value,
+    response_detail: $('#profileResponseDetail').value,
+    interaction_mode: $('#profileInteraction').value,
+    theme: $('#profileTheme').value,
+    notifications: {
+      business_insights: $('#notifyInsights').checked,
+      product_updates: $('#notifyProductUpdates').checked
+    }
+  };
+  try {
+    await saveAccountProfile(payload, status);
+    showToast('Your profile and preferences are saved.');
+  } catch (error) {
+    showToast(`Profile was not saved: ${error.message}`);
+  }
+});
+
+$('#resumeOnboarding').addEventListener('click', () => {
+  wizardStep = Math.min(accountProfile?.onboarding_step || 0, wizardQuestions.length - 1);
+  renderWizard();
+  openDialog('onboardingDialog');
+});
+
+window.addEventListener('udyamai:session-expired', () => {
+  accountProfile = null;
+  window.UdyamStore.selectMerchant('personal');
+  state = window.UdyamStore.load();
+  $('#sessionExpiredNotice').hidden = false;
+  render();
+});
+
 $('#merchantSelect').addEventListener('change', event => {
   conversationHistory = [];
   $('#voiceResponse').hidden = true;
@@ -1700,7 +2029,17 @@ $('#askShortcut').addEventListener('click', () => { $('#assistantPanel').scrollI
 $('#insightsSale').addEventListener('click', () => openDialog('saleDialog'));
 $('#addProductButton').addEventListener('click', () => openDialog('productDialog'));
 $('#addProductButton2').addEventListener('click', () => openDialog('productDialog'));
-$('#startOnboarding').addEventListener('click', () => { wizardStep = 0; wizardAnswers = { business: '', products: '', tracking: '', next: '' }; renderWizard(); openDialog('onboardingDialog'); });
+$('#startOnboarding').addEventListener('click', () => {
+  wizardStep = 0;
+  wizardAnswers = {
+    business: '', businessName: '', businessModel: '', channels: [], stage: '', goals: [],
+    products: '', tracking: '', next: '',
+    preferredLanguage: 'en', responseDetail: 'balanced', theme: state.theme,
+    interactionMode: 'both', currency: 'INR'
+  };
+  renderWizard();
+  openDialog('onboardingDialog');
+});
 function disconnectBeforeMerchantSwitch() {
   conversationHistory = [];
   $('#voiceResponse').hidden = true;
@@ -2280,77 +2619,190 @@ $('#rejectPlan').addEventListener('click', () => {
 });
 
 const wizardQuestions = [
-  { title: 'What kind of business do you run?', label: 'Choose what feels closest.', choices: ['Street vendor', 'Kirana or general store', 'Food stall or small eatery', 'Clothing or accessories shop', 'Home-based business', 'Other'] },
-  { title: 'What do you sell?', label: 'A few words are plenty.', input: 'For example, fruit, snacks or clothes', field: 'products' },
-  { title: 'How do you usually keep track of sales?', label: 'There is no wrong answer.', choices: ['I keep it in my head', 'I write it in a notebook', 'I use my phone or an app', 'I’m just getting started', 'Something else'] },
-  { title: 'What would you like to do next?', label: 'You can always come back to this later.', choices: ['Add a product', 'Record my first sale', 'I’ll do this later'] }
+  {
+    field: 'business', title: 'What kind of business do you run?',
+    label: 'Choose what feels closest. You can skip this.',
+    choices: [
+      ['street vendor', 'Street vendor'], ['kirana or general store', 'Kirana or general store'],
+      ['food stall or small eatery', 'Food stall or small eatery'],
+      ['clothing or accessories shop', 'Clothing or accessories shop'],
+      ['home-based business', 'Home-based business'], ['service business', 'Service business'], ['other', 'Other']
+    ]
+  },
+  {
+    field: 'businessModel', title: 'What do you offer?',
+    label: 'This helps keep suggestions relevant.',
+    choices: [['products', 'Products'], ['services', 'Services'], ['both', 'Both']]
+  },
+  {
+    field: 'channels', title: 'How do customers buy from you?',
+    label: 'Select all that apply.',
+    multiple: true,
+    choices: [['offline', 'In person'], ['online', 'Online']]
+  },
+  {
+    field: 'stage', title: 'Where are you in your business journey?',
+    label: 'A broad description is enough.',
+    choices: [['starting', 'Just starting'], ['operating', 'Already operating'], ['established', 'Established']]
+  },
+  {
+    field: 'tracking', title: 'How do you keep track of sales?',
+    label: 'There is no wrong answer.',
+    choices: [
+      ['memory', 'I keep it in my head'], ['notebook', 'I write it in a notebook'],
+      ['digital', 'I use my phone or an app'], ['starting', 'I am just getting started']
+    ]
+  },
+  {
+    field: 'goals', title: 'What would you like to focus on?',
+    label: 'Choose any priorities that matter to you.',
+    multiple: true,
+    choices: [
+      ['sales', 'Increase sales'], ['margins', 'Improve profit margins'],
+      ['expenses', 'Control expenses'], ['inventory', 'Reduce stock problems'],
+      ['customers', 'Attract and retain customers'], ['marketing', 'Improve marketing'],
+      ['performance', 'Understand performance'], ['automation', 'Automate repetitive tasks']
+    ]
+  },
+  {
+    title: 'How would you like UdyamAI to work for you?',
+    label: 'You can change these preferences any time.',
+    preferences: true,
+    choices: []
+  },
+  {
+    field: 'next', title: 'What would you like to do next?',
+    label: 'You can come back to the other steps later.',
+    choices: [['product', 'Add a product'], ['sale', 'Record my first sale'], ['later', 'I will do this later']]
+  }
 ];
 
 function renderWizard() {
   const question = wizardQuestions[wizardStep];
   const hi = state.language === 'hi';
-  const hindiTitles = ['आप किस तरह का कारोबार करते हैं?', 'आप क्या बेचते हैं?', 'बिक्री का हिसाब आप कैसे रखते हैं?', 'अब आप क्या करना चाहेंगे?'];
-  const hindiLabels = ['जो सबसे सही लगे, उसे चुनें।', 'कुछ शब्द काफ़ी हैं।', 'कोई जवाब गलत नहीं है।', 'आप यह काम बाद में भी कर सकते हैं।'];
-  const hindiChoices = [
-    ['सड़क किनारे दुकान', 'किराना या जनरल स्टोर', 'खाने का ठेला या छोटा रेस्टोरेंट', 'कपड़े या एक्सेसरीज़ की दुकान', 'घर से कारोबार', 'अन्य'],
-    [],
-    ['मुझे याद रहता है', 'मैं कॉपी में लिखता हूँ', 'मैं फ़ोन या ऐप इस्तेमाल करता हूँ', 'मैं अभी शुरुआत कर रहा हूँ', 'कुछ और'],
-    ['एक उत्पाद जोड़ें', 'पहली बिक्री दर्ज करें', 'मैं यह बाद में करूँगा']
-  ];
-  $('#wizardStepLabel').textContent = `${hi ? 'कुछ आसान सवाल' : 'A FEW EASY QUESTIONS'} · ${wizardStep + 1} ${hi ? 'में से' : 'OF'} 4`;
-  $('#wizardQuestion').textContent = hi ? hindiTitles[wizardStep] : question.title;
-  $('#wizardProgressBar').style.width = `${((wizardStep + 1) / 4) * 100}%`;
+  $('#wizardStepLabel').textContent = `${hi ? 'A FEW EASY QUESTIONS' : 'A FEW EASY QUESTIONS'} · ${wizardStep + 1} OF ${wizardQuestions.length}`;
+  $('#wizardQuestion').textContent = question.title;
+  $('#wizardBusinessNameLabel').hidden = wizardStep !== 0;
+  $('#wizardBusinessName').hidden = wizardStep !== 0;
+  $('#wizardBusinessName').value = wizardAnswers.businessName || '';
+  $('#wizardProgressBar').style.width = `${((wizardStep + 1) / wizardQuestions.length) * 100}%`;
   const choices = $('#wizardChoices');
   choices.replaceChildren();
-  $('#wizardInput').hidden = !question.input;
-  $('#wizardTextLabel').hidden = !question.input;
-  $('#wizardInput').placeholder = question.input ? (hi ? 'उदाहरण: फल, नाश्ता या कपड़े' : question.input) : '';
-  $('#wizardInput').value = wizardAnswers[question.field] || '';
-  $('#wizardTextLabel').textContent = hi ? hindiLabels[wizardStep] : question.label;
+  $('#wizardInput').hidden = true;
+  $('#wizardTextLabel').hidden = false;
+  $('#wizardTextLabel').textContent = question.label;
+  $('#wizardPreferences').hidden = !question.preferences;
+  choices.hidden = Boolean(question.preferences);
+  if (question.preferences) {
+    $('#wizardLanguage').value = wizardAnswers.preferredLanguage;
+    $('#wizardResponseDetail').value = wizardAnswers.responseDetail;
+    $('#wizardTheme').value = wizardAnswers.theme;
+    $('#wizardInteraction').value = wizardAnswers.interactionMode;
+    $('#wizardCurrency').value = wizardAnswers.currency;
+  }
+  const isFinalStep = wizardStep === wizardQuestions.length - 1;
+  $('#wizardSummary').hidden = !isFinalStep;
+  if (isFinalStep) {
+    const labelsFor = (field, values) => {
+      const questionForField = wizardQuestions.find(item => item.field === field);
+      const chosen = Array.isArray(values) ? values : [values];
+      return chosen.map(value => questionForField?.choices.find(choice => choice[0] === value)?.[1]).filter(Boolean).join(', ') || 'Not set';
+    };
+    $('#wizardSummaryText').textContent = [
+      `Business: ${wizardAnswers.businessName || 'Name not set'} · ${labelsFor('business', wizardAnswers.business)}`,
+      `Offering: ${labelsFor('businessModel', wizardAnswers.businessModel)}`,
+      `Sales channels: ${labelsFor('channels', wizardAnswers.channels)}`,
+      `Stage: ${labelsFor('stage', wizardAnswers.stage)}`,
+      `Focus: ${labelsFor('goals', wizardAnswers.goals)}`,
+      `Language: ${wizardAnswers.preferredLanguage} · Detail: ${wizardAnswers.responseDetail} · Theme: ${wizardAnswers.theme}`
+    ].join(' · ');
+  }
   $('#skipWizard').textContent = hi ? 'अभी छोड़ें' : 'Skip for now';
   $('#wizardBack').textContent = hi ? 'पीछे' : 'Back';
   $('#wizardBack').disabled = wizardStep === 0;
   $('#wizardSample').textContent = hi ? 'या उदाहरण कारोबार देखें' : 'Or explore a sample business';
-  if (question.choices) {
-    const values = wizardStep === 0 ? ['street vendor', 'kirana or general store', 'food stall or small eatery', 'clothing or accessories shop', 'home-based business', 'other'] : wizardStep === 2 ? ['I keep it in my head', 'I write it in a notebook', 'I use my phone or an app', 'I’m just getting started', 'Something else'] : ['product', 'sale', 'later'];
-    question.choices.forEach((label, index) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'wizard-choice';
-      button.textContent = hi ? hindiChoices[wizardStep][index] : label;
-      const selectedValue = wizardStep === 0 ? wizardAnswers.business : wizardStep === 2 ? wizardAnswers.tracking : wizardAnswers.next;
-      if (selectedValue === values[index]) button.classList.add('selected');
-      button.addEventListener('click', () => {
-        if (wizardStep === 0) wizardAnswers.business = values[index];
-        else if (wizardStep === 2) wizardAnswers.tracking = values[index];
-        else wizardAnswers.next = values[index];
-        renderWizard();
-      });
-      choices.append(button);
+  const selected = wizardAnswers[question.field];
+  question.choices.forEach(([value, label]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'wizard-choice';
+    button.textContent = label;
+    const isSelected = question.multiple ? selected.includes(value) : selected === value;
+    if (isSelected) button.classList.add('selected');
+    button.setAttribute('aria-pressed', String(isSelected));
+    button.addEventListener('click', () => {
+      if (wizardStep === 0) wizardAnswers.businessName = $('#wizardBusinessName').value.trim();
+      if (question.multiple) {
+        wizardAnswers[question.field] = isSelected
+          ? selected.filter(item => item !== value)
+          : [...selected, value];
+      } else wizardAnswers[question.field] = value;
+      renderWizard();
     });
-  }
-  $('#wizardNext').textContent = wizardStep === 3 ? (hi ? 'पूरा करें' : 'Finish') : (hi ? 'आगे →' : 'Next →');
+    choices.append(button);
+  });
+  $('#wizardNext').textContent = wizardStep === wizardQuestions.length - 1 ? (hi ? 'पूरा करें' : 'Finish') : (hi ? 'आगे →' : 'Next →');
   $('#wizardError').hidden = true;
 }
 
+function captureWizardPreferences() {
+  wizardAnswers.preferredLanguage = $('#wizardLanguage').value;
+  wizardAnswers.responseDetail = $('#wizardResponseDetail').value;
+  wizardAnswers.theme = $('#wizardTheme').value;
+  wizardAnswers.interactionMode = $('#wizardInteraction').value;
+  wizardAnswers.currency = $('#wizardCurrency').value;
+}
+
+function wizardProfilePayload(completed) {
+  captureWizardPreferences();
+  return {
+    business_name: wizardAnswers.businessName || '',
+    business_category: wizardAnswers.business || '',
+    business_model: wizardAnswers.businessModel || null,
+    sales_channels: wizardAnswers.channels,
+    business_stage: wizardAnswers.stage || null,
+    sales_tracking: wizardAnswers.tracking || null,
+    goals: wizardAnswers.goals,
+    preferred_language: wizardAnswers.preferredLanguage,
+    response_detail: wizardAnswers.responseDetail,
+    theme: wizardAnswers.theme,
+    interaction_mode: wizardAnswers.interactionMode,
+    currency: wizardAnswers.currency,
+    onboarding_step: completed ? wizardQuestions.length : wizardStep,
+    onboarding_answers: wizardAnswers,
+    ...(completed ? { onboarding_completed: true } : {})
+  };
+}
+
 $('#wizardNext').addEventListener('click', async () => {
-  const question = wizardQuestions[wizardStep];
-  if (question.field) wizardAnswers[question.field] = $('#wizardInput').value.trim();
-  const answer = wizardStep === 0 ? wizardAnswers.business : wizardStep === 2 ? wizardAnswers.tracking : wizardStep === 3 ? wizardAnswers.next : wizardAnswers.products;
-  if (!answer && wizardStep < 3) {
-    $('#wizardError').textContent = state.language === 'hi' ? 'जवाब चुनें या इस सवाल को छोड़ दें।' : 'Choose an answer or skip this question.';
-    $('#wizardError').hidden = false;
-    return;
-  }
-  if (wizardStep < 3) {
+  if (wizardStep === 0) wizardAnswers.businessName = $('#wizardBusinessName').value.trim();
+  if (wizardQuestions[wizardStep].preferences) captureWizardPreferences();
+  if (wizardStep < wizardQuestions.length - 1) {
     wizardStep += 1;
+    if (window.UdyamAPI.authenticated()) {
+      try {
+        await saveAccountProfile({ onboarding_step: wizardStep, onboarding_answers: wizardAnswers });
+      } catch (error) {
+        wizardStep -= 1;
+        $('#wizardError').textContent = error.message;
+        $('#wizardError').hidden = false;
+        return;
+      }
+    }
     renderWizard();
     return;
   }
-  const merchantName = state.name || (wizardAnswers.business ? `${wizardAnswers.business} business` : '');
-  if (window.UdyamAPI.connected()) {
+  if (window.UdyamAPI.authenticated()) {
     try {
-      await window.UdyamAPI.updateMerchant({ name: merchantName, category: wizardAnswers.business });
+      await saveAccountProfile(wizardProfilePayload(true));
+    } catch (error) {
+      $('#wizardError').textContent = error.message;
+      $('#wizardError').hidden = false;
+      return;
+    }
+  } else if (window.UdyamAPI.connected()) {
+    try {
+      await window.UdyamAPI.updateMerchant({ category: wizardAnswers.business });
     } catch (error) {
       showToast(error.message);
       return;
@@ -2358,46 +2810,94 @@ $('#wizardNext').addEventListener('click', async () => {
   }
   state.onboarding = { ...wizardAnswers };
   state.category = wizardAnswers.business;
-  state.name = merchantName;
   saveState();
   closeDialog('onboardingDialog');
   showToast('Thanks! You can add a product or sale whenever you’re ready.');
   if (wizardAnswers.next === 'product') {
     openDialog('productDialog');
-    $('#productName').value = wizardAnswers.products.split(',')[0].trim();
   }
   if (wizardAnswers.next === 'sale') {
     openDialog('saleDialog');
-    $('#saleManualName').value = wizardAnswers.products.split(',')[0].trim();
   }
 });
 
 $('#wizardBack').addEventListener('click', () => {
   if (wizardStep > 0) {
-    if (wizardQuestions[wizardStep].field) wizardAnswers[wizardQuestions[wizardStep].field] = $('#wizardInput').value.trim();
+    if (wizardStep === 1) wizardAnswers.businessName = $('#wizardBusinessName').value.trim();
+    if (wizardQuestions[wizardStep].preferences) captureWizardPreferences();
     wizardStep -= 1;
     renderWizard();
+    if (window.UdyamAPI.authenticated()) {
+      void saveAccountProfile({ onboarding_step: wizardStep, onboarding_answers: wizardAnswers }).catch(error => {
+        $('#wizardError').textContent = error.message;
+        $('#wizardError').hidden = false;
+      });
+    }
   }
 });
+$('#editWizardAnswers').addEventListener('click', () => {
+  wizardStep = 0;
+  renderWizard();
+});
 
-$('#skipWizard').addEventListener('click', () => {
-  if (wizardStep < 3) { wizardStep += 1; renderWizard(); }
-  else {
-    state.onboarding = { ...wizardAnswers };
-    state.category = wizardAnswers.business;
-    saveState();
-    closeDialog('onboardingDialog');
-    showToast(state.language === 'hi' ? 'कोई बात नहीं। आप कभी भी वापस आ सकते हैं।' : 'No problem. You can come back any time.');
+$('#skipWizard').addEventListener('click', async () => {
+  if (wizardStep === 0) wizardAnswers.businessName = $('#wizardBusinessName').value.trim();
+  if (wizardQuestions[wizardStep].preferences) captureWizardPreferences();
+  if (wizardStep < wizardQuestions.length - 1) {
+    wizardStep += 1;
+    if (window.UdyamAPI.authenticated()) {
+      try {
+        await saveAccountProfile({ onboarding_step: wizardStep, onboarding_answers: wizardAnswers });
+      } catch (error) {
+        wizardStep -= 1;
+        $('#wizardError').textContent = error.message;
+        $('#wizardError').hidden = false;
+        return;
+      }
+    }
+    renderWizard();
+    return;
   }
+  if (window.UdyamAPI.authenticated()) {
+    try {
+      await saveAccountProfile(wizardProfilePayload(true));
+    } catch (error) {
+      $('#wizardError').textContent = error.message;
+      $('#wizardError').hidden = false;
+      return;
+    }
+  }
+  state.onboarding = { ...wizardAnswers };
+  saveState();
+  closeDialog('onboardingDialog');
+  showToast(state.language === 'hi' ? 'कोई बात नहीं। आप कभी भी वापस आ सकते हैं।' : 'No problem. You can come back any time.');
 });
 
 $('#resetButton').addEventListener('click', () => {
+  if (window.UdyamAPI.authenticated()) {
+    showToast('Sign out before clearing local preview data. Your account data is not stored only on this device.');
+    return;
+  }
   if (!window.confirm('Clear sales, expenses, products and preferences saved on this device? This cannot be undone.')) return;
   window.UdyamAPI.disconnect();
   window.UdyamStore.resetPersonal();
   state = window.UdyamStore.load();
   render();
+  if (pendingResetToken) {
+    showAccountDialog('resetPasswordPanel');
+  }
   showToast('Your saved information has been cleared.');
 });
 
 render();
+if (pendingResetToken) {
+  showAccountDialog('resetPasswordPanel');
+} else if (document.cookie.includes('udyamai_csrf=')) {
+  window.UdyamAPI.restoreSession($('#backendUrl').value.trim())
+    .then(records => connectAccountRecords(records))
+    .catch(error => {
+      $('#sessionExpiredNotice').textContent = `Could not restore your session. Sign in again to sync business records. (${error.message})`;
+      $('#sessionExpiredNotice').hidden = false;
+      console.warn('Could not restore the account session.', error);
+    });
+}

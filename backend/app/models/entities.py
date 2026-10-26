@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -13,13 +13,68 @@ def utc_now() -> datetime:
 
 class Merchant(Base):
     __tablename__ = "merchants"
+    __table_args__ = (Index("uq_merchants_owner_user_id", "owner_user_id", unique=True),)
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     name: Mapped[str] = mapped_column(String(160), default="")
     category: Mapped[str] = mapped_column(String(100), default="")
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    owner_user_id: Mapped[str | None] = mapped_column(ForeignKey(
+        "user_accounts.id",
+        name="fk_merchants_owner_user_id_user_accounts",
+        ondelete="SET NULL",
+    ))
+    business_model: Mapped[str | None] = mapped_column(String(20))
+    sales_channels: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    business_stage: Mapped[str | None] = mapped_column(String(30))
+    sales_tracking: Mapped[str | None] = mapped_column(String(20))
+    business_size: Mapped[str | None] = mapped_column(String(30))
+    currency: Mapped[str] = mapped_column(String(3), default="INR", nullable=False)
+    business_location: Mapped[str | None] = mapped_column(String(120))
+    goals: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    preferred_language: Mapped[str] = mapped_column(String(20), default="en", nullable=False)
+    response_detail: Mapped[str] = mapped_column(String(20), default="balanced", nullable=False)
+    interaction_mode: Mapped[str] = mapped_column(String(20), default="both", nullable=False)
+    theme: Mapped[str] = mapped_column(String(20), default="system", nullable=False)
+    notifications: Mapped[dict[str, bool]] = mapped_column(JSON, default=dict, nullable=False)
+    onboarding_step: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    onboarding_answers: Mapped[dict[str, str | list[str]]] = mapped_column(JSON, default=dict, nullable=False)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     products: Mapped[list["Product"]] = relationship(back_populates="merchant", cascade="all, delete-orphan")
+
+
+class UserAccount(Base):
+    __tablename__ = "user_accounts"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    full_name: Mapped[str] = mapped_column(String(120), default="")
+    password_hash: Mapped[str] = mapped_column(String(512))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True)
+    refresh_token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class Product(Base):
