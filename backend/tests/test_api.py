@@ -380,3 +380,271 @@ def test_recommendation_outcome_can_be_recorded_without_claiming_causation(clien
     assert updated.status_code == 200
     assert updated.json()["fairly_comparable"] is False
     assert client.get("/api/merchants/personal/outcomes", headers=auth).json()[0]["actual_outcome"]["recorded_sales"] == 120
+
+
+def test_analytics_uses_recorded_sales_costs_expenses_and_comparable_period(client, auth):
+    today = date.today()
+    previous = today - timedelta(days=7)
+    assert client.post(
+        "/api/merchants/personal/products/rice/inventory",
+        headers=auth,
+        json={"quantity": 100},
+    ).status_code == 201
+    assert client.post(
+        "/api/merchants/personal/sales",
+        headers=auth,
+        json={"product_id": "rice", "amount": "20", "unit_price": "10", "quantity": 2, "date": previous.isoformat()},
+    ).status_code == 201
+    assert client.post(
+        "/api/merchants/personal/sales",
+        headers=auth,
+        json={"product_id": "rice", "amount": "30", "unit_price": "10", "quantity": 3, "date": today.isoformat()},
+    ).status_code == 201
+    assert client.post(
+        "/api/merchants/personal/expenses",
+        headers=auth,
+        json={"amount": "5", "date": today.isoformat(), "category": "Rent"},
+    ).status_code == 201
+
+    result = client.get(
+        f"/api/merchants/personal/analytics?start_date={today.isoformat()}&end_date={today.isoformat()}",
+        headers=auth,
+    )
+    assert result.status_code == 200
+    body = result.json()
+    assert body["metrics"]["revenue"] == "30.00"
+    assert body["metrics"]["recorded_expenses"] == "5.00"
+    assert body["metrics"]["gross_profit"] == "15.00"
+    assert body["metrics"]["net_profit"] == "10.00"
+    assert body["metrics"]["average_sale_value"] == "30.00"
+    assert body["best_performing_products"][0]["name"] == "Rice"
+    assert body["expenses_by_category"] == [{"category": "Rent", "amount": "5.00"}]
+    assert body["comparison"]["available"] is True
+    assert body["currency"] == "INR"
+
+
+def test_analytics_discloses_unknown_costs_and_validates_range(client, auth):
+    today = date.today()
+    client.post(
+        "/api/merchants/personal/sales",
+        headers=auth,
+        json={"amount": "10", "date": today.isoformat()},
+    )
+    base = f"/api/merchants/personal/analytics?start_date={today.isoformat()}&end_date={today.isoformat()}"
+    body = client.get(base, headers=auth).json()
+    assert body["metrics"]["gross_profit"] is None
+    assert body["metrics"]["net_profit"] is None
+    assert body["coverage"]["missing_information"]
+
+    invalid = client.get(
+        f"/api/merchants/personal/analytics?start_date={today.isoformat()}&end_date={(today - timedelta(days=1)).isoformat()}",
+        headers=auth,
+    )
+    assert invalid.status_code == 422
+    assert client.get(base.replace("personal", "other"), headers=auth).status_code == 403
+
+
+def test_csv_import_requires_preview_confirmation_maps_columns_and_skips_duplicates(client, auth):
+    today = date.today().isoformat()
+    content = (
+        "Sale day,Total,Units,Item,Unit price,COGS,Note\n"
+        f"{today},20,2,Rice,10,10,historical record\n"
+        f"{today},20,2,Rice,10,10,historical record\n"
+        "not-a-date,5,1,,5,,bad date\n"
+    )
+    files = {"file": ("sales.csv", content, "text/csv")}
+    path = "/api/merchants/personal/imports/preview"
+    preview_response = client.post(path, data={"record_type": "sales"}, files=files, headers=auth)
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["valid_count"] == 1
+    assert preview["skipped_count"] == 1
+    assert preview["invalid_count"] == 1
+    assert preview["mapping"]["date"] == "Sale day"
+    assert preview["preview_records"][0]["record"]["cost_of_goods"] == "10.00"
+
+    confirm = client.post(
+        "/api/merchants/personal/imports/confirm",
+        data={
+            "record_type": "sales",
+            "mapping_json": json.dumps(preview["mapping"]),
+            "expected_digest": preview["preview_digest"],
+            "confirmed": "true",
+        },
+        files=files,
+        headers=auth,
+    )
+    assert confirm.status_code == 200
+    assert confirm.json()["imported_count"] == 1
+    assert confirm.json()["skipped_count"] == 1
+    assert confirm.json()["failed_count"] == 1
+    assert "do not change current stock" in confirm.json()["inventory_note"]
+    assert client.get("/api/merchants/personal/products", headers=auth).json()[0]["quantity"] == 2
+    sales = client.get("/api/merchants/personal/sales", headers=auth).json()
+    imported = [sale for sale in sales if sale["source"] == "import"]
+    assert len(imported) == 1
+
+    duplicate = client.post(
+        "/api/merchants/personal/imports/confirm",
+        data={
+            "record_type": "sales",
+            "mapping_json": json.dumps(preview["mapping"]),
+            "expected_digest": preview["preview_digest"],
+            "confirmed": "true",
+        },
+        files=files,
+        headers=auth,
+    )
+    assert duplicate.status_code == 200
+    assert duplicate.json()["imported_count"] == 0
+    assert duplicate.json()["skipped_count"] == 2
+
+
+def test_csv_import_rejects_changed_file_and_demo_writes_and_exports_are_merchant_scoped(client, auth):
+    from app.core.config import get_settings
+
+    content = f"date,amount\n{date.today().isoformat()},10\n"
+    preview = client.post(
+        "/api/merchants/personal/imports/preview",
+        data={"record_type": "expenses"},
+        files={"file": ("expenses.csv", content, "text/csv")},
+        headers=auth,
+    ).json()
+    changed = client.post(
+        "/api/merchants/personal/imports/confirm",
+        data={
+            "record_type": "expenses",
+            "mapping_json": json.dumps(preview["mapping"]),
+            "expected_digest": preview["preview_digest"],
+            "confirmed": "true",
+        },
+        files={"file": ("expenses.csv", content + "\n", "text/csv")},
+        headers=auth,
+    )
+    assert changed.status_code == 409
+    assert client.get(
+        f"/api/merchants/other/exports/sales?start_date={date.today().isoformat()}&end_date={date.today().isoformat()}",
+        headers=auth,
+    ).status_code == 403
+
+    demo_preview = client.post(
+        "/api/merchants/coconut/imports/preview",
+        data={"record_type": "expenses"},
+        files={"file": ("expenses.csv", content, "text/csv")},
+        headers={"Authorization": f"Bearer {get_settings().token_map['coconut']}"},
+    )
+    assert demo_preview.status_code == 200
+    demo_confirm = client.post(
+        "/api/merchants/coconut/imports/confirm",
+        data={
+            "record_type": "expenses",
+            "mapping_json": json.dumps(demo_preview.json()["mapping"]),
+            "expected_digest": demo_preview.json()["preview_digest"],
+            "confirmed": "true",
+        },
+        files={"file": ("expenses.csv", content, "text/csv")},
+        headers={"Authorization": f"Bearer {get_settings().token_map['coconut']}"},
+    )
+    assert demo_confirm.status_code == 403
+
+
+def test_csv_export_is_scoped_and_spreadsheet_formula_safe(client, auth):
+    today = date.today()
+    created = client.post(
+        "/api/merchants/personal/expenses",
+        headers=auth,
+        json={"amount": "7.25", "date": today.isoformat(), "category": "=cmd"},
+    )
+    assert created.status_code == 201
+    response = client.get(
+        f"/api/merchants/personal/exports/expenses?start_date={today.isoformat()}&end_date={today.isoformat()}",
+        headers=auth,
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "'=cmd" in response.text
+    assert "other" not in response.text
+
+
+def test_assistant_trend_uses_the_shared_analytics_records(client, auth):
+    today = date.today()
+    for days_ago, amount in ((35, "50"), (5, "100")):
+        response = client.post(
+            "/api/merchants/personal/sales",
+            headers=auth,
+            json={"amount": amount, "date": (today - timedelta(days=days_ago)).isoformat()},
+        )
+        assert response.status_code == 201
+    answer = client.post(
+        "/api/merchants/personal/assistant",
+        headers=auth,
+        json={"question": "Meri pichhle 30 din ki sales ka trend batao.", "language": "en"},
+    )
+    assert answer.status_code == 200
+    assert answer.json()["source"] == "rules"
+    assert "100.00" in answer.json()["message"]
+
+
+def test_csv_sales_do_not_guess_historical_cost_from_current_product_cost(client, auth):
+    content = f"date,amount,quantity,product_name\n{date.today().isoformat()},10,1,Rice\n"
+    preview = client.post(
+        "/api/merchants/personal/imports/preview",
+        data={"record_type": "sales"},
+        files={"file": ("sales.csv", content, "text/csv")},
+        headers=auth,
+    ).json()
+    imported = client.post(
+        "/api/merchants/personal/imports/confirm",
+        data={
+            "record_type": "sales",
+            "mapping_json": json.dumps(preview["mapping"]),
+            "expected_digest": preview["preview_digest"],
+            "confirmed": "true",
+        },
+        files={"file": ("sales.csv", content, "text/csv")},
+        headers=auth,
+    )
+    assert imported.status_code == 200
+    sale = client.get("/api/merchants/personal/sales", headers=auth).json()[0]
+    assert sale["cost_of_goods"] is None
+    metrics = client.get(
+        f"/api/merchants/personal/analytics?start_date={date.today().isoformat()}&end_date={date.today().isoformat()}",
+        headers=auth,
+    ).json()["metrics"]
+    assert metrics["gross_profit"] is None
+    assert metrics["net_profit"] is None
+
+
+def test_product_csv_import_records_initial_stock_without_overwriting_duplicates(client, auth):
+    content = "name,category,quantity,cost,price,supplier_lead_time_days\nNew tea,Drinks,7,2.25,5,3\n"
+    preview = client.post(
+        "/api/merchants/personal/imports/preview",
+        data={"record_type": "products"},
+        files={"file": ("products.csv", content, "text/csv")},
+        headers=auth,
+    ).json()
+    result = client.post(
+        "/api/merchants/personal/imports/confirm",
+        data={
+            "record_type": "products",
+            "mapping_json": json.dumps(preview["mapping"]),
+            "expected_digest": preview["preview_digest"],
+            "confirmed": "true",
+        },
+        files={"file": ("products.csv", content, "text/csv")},
+        headers=auth,
+    )
+    assert result.status_code == 200
+    product = next(item for item in client.get("/api/merchants/personal/products", headers=auth).json() if item["name"] == "New tea")
+    history = client.get(f"/api/merchants/personal/products/{product['id']}/inventory", headers=auth).json()
+    assert product["quantity"] == 7
+    assert len(history) == 1
+    assert "imported" in history[0]["note"]
+
+    duplicate_preview = client.post(
+        "/api/merchants/personal/imports/preview",
+        data={"record_type": "products"},
+        files={"file": ("products.csv", content, "text/csv")},
+        headers=auth,
+    ).json()
+    assert duplicate_preview["skipped_count"] == 1

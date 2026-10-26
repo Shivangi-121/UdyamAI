@@ -188,6 +188,54 @@ window.UdyamAPI = (() => {
     return request(merchantPath('/assistant/voice'), { method: 'POST', body });
   }
 
+  async function downloadCsv(path, fallbackName) {
+    if (!connection) throw new Error('Connect to the backend first.');
+    let response = await sendRequest(connection.baseUrl, path, {}, connection.token);
+    if (response.status === 401 && connection.account) {
+      try {
+        const refreshed = await refreshAccountSession(connection.baseUrl);
+        response = await sendRequest(connection.baseUrl, path, {}, refreshed.access_token);
+      } catch (error) {
+        connection = null;
+        profile = null;
+        window.dispatchEvent(new CustomEvent('udyamai:session-expired'));
+        throw error;
+      }
+    }
+    if (!response.ok) {
+      await parseResponse(response);
+      return;
+    }
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const filename = disposition.match(/filename="([^"]+)"/)?.[1] || fallbackName;
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function previewImport(file, recordType, mapping = null) {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    body.append('record_type', recordType);
+    if (mapping) body.append('mapping_json', JSON.stringify(mapping));
+    return request(merchantPath('/imports/preview'), { method: 'POST', body });
+  }
+
+  async function confirmImport(file, recordType, mapping, digest) {
+    const body = new FormData();
+    body.append('file', file, file.name);
+    body.append('record_type', recordType);
+    body.append('mapping_json', JSON.stringify(mapping));
+    body.append('expected_digest', digest);
+    body.append('confirmed', 'true');
+    return request(merchantPath('/imports/confirm'), { method: 'POST', body });
+  }
+
   return {
     connect,
     signIn,
@@ -198,6 +246,25 @@ window.UdyamAPI = (() => {
     connected,
     authenticated,
     profile: () => profile,
+    loadRecords,
+    analytics: (startDate, endDate) => request(
+      merchantPath(`/analytics?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`)
+    ),
+    previewImport,
+    confirmImport,
+    downloadTemplate: recordType => downloadCsv(
+      merchantPath(`/imports/templates/${encodeURIComponent(recordType)}`),
+      `${recordType}-template.csv`
+    ),
+    exportCsv: (recordType, startDate, endDate) => {
+      const query = recordType === 'products'
+        ? ''
+        : `?start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+      return downloadCsv(
+        merchantPath(`/exports/${encodeURIComponent(recordType)}${query}`),
+        `${recordType}.csv`
+      );
+    },
     updateProfile: payload => request('/api/auth/profile', patch(payload)),
     requestPasswordReset: (baseUrl, email) => authRequest(baseUrl, '/api/auth/password-reset/request', json({ email })),
     completePasswordReset: (baseUrl, token, password) => authRequest(baseUrl, '/api/auth/password-reset/complete', json({ token, password })),

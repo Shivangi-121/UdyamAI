@@ -1,13 +1,14 @@
 import inspect
 import json
 import re
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Literal
 
 import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.agents import coordinate_recommendation
@@ -15,7 +16,8 @@ from app.core.config import get_settings
 from app.core.time import business_today
 from app.models import AutopilotTask, BusinessInsight, Expense, Merchant, Product, Sale
 from app.schemas.api import AssistantRequest, CampaignGenerate, CampaignGenerated, Recommendation, ScenarioInput
-from app.services.calculations import recorded_metrics, simulate_scenario
+from app.services.analytics import merchant_analytics, merchant_recorded_metrics
+from app.services.calculations import simulate_scenario
 from app.services.sarvam import complete_chat
 
 
@@ -24,8 +26,18 @@ def merchant_context(db: Session, merchant_id: str) -> dict:
     if merchant is None:
         raise HTTPException(status_code=404, detail="Merchant not found")
     products = list(db.scalars(select(Product).where(Product.merchant_id == merchant_id)))
-    sales = list(db.scalars(select(Sale).where(Sale.merchant_id == merchant_id).order_by(Sale.date.desc(), Sale.created_at.desc())))
-    expenses = list(db.scalars(select(Expense).where(Expense.merchant_id == merchant_id).order_by(Expense.date.desc(), Expense.created_at.desc())))
+    sales = list(db.scalars(
+        select(Sale)
+        .where(Sale.merchant_id == merchant_id)
+        .order_by(Sale.date.desc(), Sale.created_at.desc())
+        .limit(200)
+    ))
+    expenses = list(db.scalars(
+        select(Expense)
+        .where(Expense.merchant_id == merchant_id)
+        .order_by(Expense.date.desc(), Expense.created_at.desc())
+        .limit(100)
+    ))
     return {
         "merchant": {"name": merchant.name, "category": merchant.category},
         "merchant_profile": {
@@ -46,7 +58,7 @@ def merchant_context(db: Session, merchant_id: str) -> dict:
             for s in sales[:200]
         ],
         "expenses": [{"date": e.date.isoformat(), "amount": str(e.amount), "category": e.category} for e in expenses[:100]],
-        "recorded_metrics": recorded_metrics(sales, expenses),
+        "recorded_metrics": merchant_recorded_metrics(db, merchant_id),
     }
 
 
@@ -57,6 +69,11 @@ class EmptyToolArguments(BaseModel):
 class SalesSummaryArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
     period: Literal["today", "all"]
+
+
+class AnalyticsArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    period: Literal["today", "last_7_days", "last_30_days", "this_month", "previous_month"]
 
 
 class ScenarioToolArguments(ScenarioInput):
@@ -78,19 +95,39 @@ def _tool_definition(name: str, description: str, arguments: type[BaseModel]) ->
 
 async def _sales_summary(db: Session, merchant_id: str, arguments: BaseModel) -> dict[str, Any]:
     period = SalesSummaryArguments.model_validate(arguments).period
-    sales = list(db.scalars(select(Sale).where(Sale.merchant_id == merchant_id)))
-    if period == "today":
-        sales = [sale for sale in sales if sale.date == business_today()]
-    amount = sum((sale.amount for sale in sales), Decimal("0"))
-    costs_known = bool(sales) and all(sale.cost_of_goods is not None for sale in sales)
+    start_date = business_today() if period == "today" else None
+    metrics = merchant_recorded_metrics(db, merchant_id, start_date, start_date)
     return {
         "period": period,
-        "sale_count": len(sales),
-        "recorded_sales": str(amount),
-        "gross_profit_before_other_expenses": str(
-            amount - sum((sale.cost_of_goods for sale in sales), Decimal("0"))
-        ) if costs_known else None,
-        "missing_information": [] if costs_known else ["Cost of goods is missing for one or more sales."],
+        "sale_count": metrics["sales_count"],
+        "recorded_sales": metrics["revenue"],
+        "gross_profit_before_other_expenses": metrics["gross_profit"],
+        "missing_information": metrics["missing_information"],
+    }
+
+
+def _analytics_summary(db: Session, merchant_id: str, arguments: BaseModel) -> dict[str, Any]:
+    period = AnalyticsArguments.model_validate(arguments).period
+    today = business_today()
+    if period == "today":
+        start_date = today
+        end_date = today
+    elif period == "last_7_days":
+        start_date = today - timedelta(days=6)
+        end_date = today
+    elif period == "last_30_days":
+        start_date = today - timedelta(days=29)
+        end_date = today
+    elif period == "this_month":
+        start_date = date(today.year, today.month, 1)
+        end_date = today
+    else:
+        this_month = date(today.year, today.month, 1)
+        end_date = this_month - timedelta(days=1)
+        start_date = date(end_date.year, end_date.month, 1)
+    return {
+        "period": period,
+        **merchant_analytics(db, merchant_id, start_date, end_date),
     }
 
 
@@ -130,14 +167,16 @@ def _business_pulse(db: Session, merchant_id: str, _: BaseModel) -> dict[str, An
 
 
 def _expenses_summary(db: Session, merchant_id: str, _: BaseModel) -> dict[str, Any]:
-    expenses = list(db.scalars(select(Expense).where(Expense.merchant_id == merchant_id)))
-    totals: dict[str, Decimal] = {}
-    for expense in expenses:
-        totals[expense.category] = totals.get(expense.category, Decimal("0")) + expense.amount
+    metrics = merchant_recorded_metrics(db, merchant_id)
+    totals = db.execute(
+        select(Expense.category, func.sum(Expense.amount))
+        .where(Expense.merchant_id == merchant_id)
+        .group_by(Expense.category)
+    ).all()
     return {
-        "expense_count": len(expenses),
-        "recorded_total": str(sum(totals.values(), Decimal("0"))),
-        "by_category": {category: str(amount) for category, amount in totals.items()},
+        "expense_count": metrics["expenses_count"],
+        "recorded_total": metrics["recorded_expenses"],
+        "by_category": {category: str(amount) for category, amount in totals},
     }
 
 
@@ -177,6 +216,11 @@ _SARVAM_TOOLS: dict[str, tuple[type[BaseModel], Any, str]] = {
         SalesSummaryArguments,
         _sales_summary,
         "Retrieve recorded sales and gross profit for today or all available records.",
+    ),
+    "get_analytics": (
+        AnalyticsArguments,
+        _analytics_summary,
+        "Retrieve date-bounded revenue, expenses, profit when costs are complete, trends, product revenue, and data coverage for a supported period.",
     ),
     "get_inventory_status": (
         EmptyToolArguments,
@@ -482,18 +526,128 @@ async def generate_campaign(db: Session, merchant_id: str, request: CampaignGene
         raise HTTPException(status_code=502, detail="AI service returned an invalid response.") from exc
 
 
+def _answer_analytics_question(
+    db: Session,
+    merchant_id: str,
+    request: AssistantRequest,
+    question: str,
+) -> Recommendation:
+    end_date = business_today()
+    if re.search(r"last 7|pichhle 7|week", question):
+        start_date = end_date - timedelta(days=6)
+        period_label = "last 7 days"
+    elif re.search(r"this month|is mahine", question):
+        start_date = date(end_date.year, end_date.month, 1)
+        period_label = "this month"
+    elif re.search(r"previous month|last month|pichhle mahine", question):
+        end_date = date(end_date.year, end_date.month, 1) - timedelta(days=1)
+        start_date = date(end_date.year, end_date.month, 1)
+        period_label = "previous month"
+    else:
+        start_date = end_date - timedelta(days=29)
+        period_label = "last 30 days"
+    analytics = merchant_analytics(db, merchant_id, start_date, end_date)
+    previous = analytics["comparison"]["previous_period"]
+    evidence = [f"Period: {start_date.isoformat()} to {end_date.isoformat()}."]
+    missing = []
+
+    if re.search(r"category|expense.*increas|increas.*expense|खर्च", question):
+        if previous is None:
+            message = "I need more recorded history to compare expense categories over the matching previous period."
+            missing.append("A complete previous period is not covered by the records.")
+        else:
+            earlier = {item["category"]: Decimal(item["amount"]) for item in previous["expenses_by_category"]}
+            changes = [
+                (item["category"], Decimal(item["amount"]) - earlier.get(item["category"], Decimal("0")))
+                for item in analytics["expenses_by_category"]
+            ]
+            increasing = [item for item in changes if item[1] > 0]
+            if increasing:
+                category, change = max(increasing, key=lambda item: item[1])
+                current = next(
+                    Decimal(item["amount"])
+                    for item in analytics["expenses_by_category"]
+                    if item["category"] == category
+                )
+                message = (
+                    f"{category} had the largest recorded increase: {analytics['currency']} {change:.2f} "
+                    f"({analytics['currency']} {earlier.get(category, Decimal('0')):.2f} to {analytics['currency']} {current:.2f})."
+                )
+                evidence.append(f"Compared {period_label} with {previous['start_date']} to {previous['end_date']}.")
+            else:
+                message = f"No expense category increased in the recorded {period_label} comparison."
+                evidence.append("Compared category totals use saved expense entries only.")
+    elif re.search(r"product.*revenue|revenue.*product|generate.*revenue", question):
+        best = analytics["best_performing_products"]
+        if best:
+            message = (
+                f"{best[0]['name']} had the highest recorded product revenue: "
+                f"{analytics['currency']} {best[0]['revenue']} in {period_label}."
+            )
+            evidence.append(f"{best[0]['quantity_sold']} units across {best[0]['sales_count']} sale records.")
+        else:
+            message = "There are no product-linked sales in this period to compare product revenue."
+            missing.append("Sales without a linked product cannot be ranked by product.")
+    elif re.search(r"profit.*data|data.*profit|calculate.*profit", question):
+        if analytics["metrics"]["net_profit"] is None:
+            message = "Net profit is unavailable because at least one sale is missing its recorded cost of goods. Record historical sale costs and expenses to improve the calculation."
+            missing.extend(analytics["coverage"]["missing_information"])
+        else:
+            message = (
+                f"Recorded net profit for {period_label} is {analytics['currency']} "
+                f"{analytics['metrics']['net_profit']}; it is gross profit less recorded expenses."
+            )
+            evidence.append(
+                f"Revenue {analytics['currency']} {analytics['metrics']['revenue']}; "
+                f"recorded expenses {analytics['currency']} {analytics['metrics']['recorded_expenses']}."
+            )
+    else:
+        current = Decimal(analytics["metrics"]["revenue"])
+        if previous is not None and Decimal(previous["revenue"]) > 0:
+            earlier_revenue = Decimal(previous["revenue"])
+            change = ((current - earlier_revenue) / earlier_revenue * 100).quantize(Decimal("1"))
+            direction = "increased" if change >= 0 else "decreased"
+            message = (
+                f"Recorded sales {direction} by about {abs(change)}%: {analytics['currency']} {current:.2f} "
+                f"in {period_label} versus {analytics['currency']} {earlier_revenue:.2f} in the previous matching period."
+            )
+            evidence.append("This compares recorded sale amounts only and does not establish the cause of a change.")
+        else:
+            message = (
+                f"Recorded revenue in {period_label} was {analytics['currency']} {current:.2f}. "
+                "There is not enough history for a comparable trend yet."
+            )
+            missing.append("A complete previous period is needed to compare a sales trend.")
+    return Recommendation(
+        title="Recorded business analytics",
+        message=message,
+        evidence=evidence,
+        missing_information=missing,
+        next_action="Review the analytics date range and check that the records are complete.",
+        source="rules",
+        observed_data=[f"Period: {start_date.isoformat()} to {end_date.isoformat()}"],
+        assumptions=["Only records saved for this merchant were used."],
+    )
+
+
 def demo_answer(db: Session, merchant_id: str, request: AssistantRequest) -> Recommendation:
     context = merchant_context(db, merchant_id)
     question = request.question.casefold()
     products = list(db.scalars(select(Product).where(Product.merchant_id == merchant_id)))
     sales = list(db.scalars(select(Sale).where(Sale.merchant_id == merchant_id)))
     today = business_today()
+    currency = context["merchant_profile"]["currency"]
     today_sales = [sale for sale in sales if sale.date == today]
     evidence = []
     missing = []
     title = "A practical next step"
     next_action = "Check your stock"
     asks_for_product_ranking = re.search(r"product|sell the most|top item|popular|sabse|zyada|ज़्यादा", question)
+    if re.search(
+        r"trend|compare|compared|increased|category|revenue generate|last 7|last 30|pichhle|this month|previous month|calculate.*profit|profit.*data",
+        question,
+    ):
+        return _answer_analytics_question(db, merchant_id, request, question)
     if re.search(r"earn|sell|sales|sale|revenue|kamai|bikri|बिक्री|कमाई", question) and not asks_for_product_ranking:
         is_today = bool(re.search(r"today|aaj|आज", question))
         selected_sales = today_sales if is_today else sales
@@ -504,8 +658,8 @@ def demo_answer(db: Session, merchant_id: str, request: AssistantRequest) -> Rec
         )
         amount = sum((sale.amount for sale in selected_sales), Decimal("0"))
         message = (
-            (f"{len(selected_sales)} बिक्री में कुल ₹{amount:.2f} दर्ज हैं।" if request.language == "hi"
-             else f"{len(selected_sales)} sale(s) totaling ₹{amount:.2f} are recorded{' for today' if is_today else ''}.")
+            (f"{len(selected_sales)} बिक्री में कुल {currency} {amount:.2f} दर्ज हैं।" if request.language == "hi"
+             else f"{len(selected_sales)} sale(s) totaling {currency} {amount:.2f} are recorded{' for today' if is_today else ''}.")
             if selected_sales
             else (("आज की बिक्री अभी दर्ज नहीं है। शुरुआत के लिए कुल राशि दर्ज करें।" if request.language == "hi"
                    else "No sales have been recorded today yet. You can enter a total amount to get started.")
@@ -513,13 +667,13 @@ def demo_answer(db: Session, merchant_id: str, request: AssistantRequest) -> Rec
                   else ("अभी कोई बिक्री दर्ज नहीं है।" if request.language == "hi" else "No sales have been recorded yet."))
         )
         if is_today:
-            evidence.append(f"Recorded for {today.isoformat()}: {len(selected_sales)} sale(s), ₹{amount:.2f} revenue.")
+            evidence.append(f"Recorded for {today.isoformat()}: {len(selected_sales)} sale(s), {currency} {amount:.2f} revenue.")
         else:
-            evidence.append(f"All recorded sales: {len(selected_sales)} sale(s), ₹{amount:.2f} revenue.")
+            evidence.append(f"All recorded sales: {len(selected_sales)} sale(s), {currency} {amount:.2f} revenue.")
         costs_known = bool(selected_sales) and all(sale.cost_of_goods is not None for sale in selected_sales)
         if costs_known:
             cogs = sum((sale.cost_of_goods for sale in selected_sales), Decimal("0"))
-            evidence.append(f"Recorded gross profit before other expenses: ₹{amount - cogs:.2f}.")
+            evidence.append(f"Recorded gross profit before other expenses: {currency} {amount - cogs:.2f}.")
         elif selected_sales:
             missing.append("Unit cost is missing for one or more sales; gross profit is not shown.")
         next_action = "Record another sale" if not selected_sales else "Review business insights"
@@ -604,11 +758,11 @@ def demo_answer(db: Session, merchant_id: str, request: AssistantRequest) -> Rec
             cogs = sum((sale.cost_of_goods for sale in selected_sales), Decimal("0"))
             gross_profit = amount - cogs
             message = (
-                f"दर्ज सकल मुनाफ़ा ₹{gross_profit:.2f} है। इसमें दुकान के दूसरे खर्च शामिल नहीं हैं।"
+                f"दर्ज सकल मुनाफ़ा {currency} {gross_profit:.2f} है। इसमें दुकान के दूसरे खर्च शामिल नहीं हैं।"
                 if request.language == "hi"
-                else f"Recorded gross profit is ₹{gross_profit:.2f}. This excludes other shop expenses."
+                else f"Recorded gross profit is {currency} {gross_profit:.2f}. This excludes other shop expenses."
             )
-            evidence.append(f"Revenue ₹{amount:.2f} less cost of goods sold ₹{cogs:.2f}.")
+            evidence.append(f"Revenue {currency} {amount:.2f} less cost of goods sold {currency} {cogs:.2f}.")
         else:
             message = (
                 "सकल मुनाफ़ा बताने के लिए हर बिक्री की लागत दर्ज होनी चाहिए।"
@@ -629,7 +783,7 @@ def demo_answer(db: Session, merchant_id: str, request: AssistantRequest) -> Rec
             else "I can use your saved records, but I need a specific question to give a useful answer. You can ask about today’s sales, stock, product sales, or a promotion."
         )
         evidence.extend([
-            f"{summary['sales_count']} recorded sales; revenue ₹{summary['revenue']}.",
+            f"{summary['sales_count']} recorded sales; revenue {currency} {summary['revenue']}.",
             f"{len(products)} products on the list.",
         ])
         if not summary["gross_profit_available"]:

@@ -157,6 +157,38 @@
               <div id="transactionList" class="transaction-list"></div>
             </section>
 
+            <section class="analytics-panel" id="analyticsPanel" aria-labelledby="analyticsTitle" hidden>
+              <div class="section-heading">
+                <div><p class="eyebrow" id="analyticsEyebrow">MERCHANT RECORDS · NOT A FORECAST</p><h2 id="analyticsTitle">Business analytics</h2></div>
+                <label class="analytics-range-label" id="analyticsRangeLabel" for="analyticsRange">Period
+                  <select id="analyticsRange">
+                    <option value="today">Today</option><option value="7">Last 7 days</option>
+                    <option value="30" selected>Last 30 days</option><option value="month">This month</option>
+                    <option value="previous">Previous month</option><option value="custom">Custom range</option>
+                  </select>
+                </label>
+              </div>
+              <div class="analytics-custom-range" id="analyticsCustomRange" hidden>
+                <label id="analyticsStartLabel">From <input id="analyticsStartDate" type="date"></label>
+                <label id="analyticsEndLabel">To <input id="analyticsEndDate" type="date"></label>
+                <button type="button" class="outline-button" id="applyAnalyticsRange">Apply dates</button>
+              </div>
+              <p id="analyticsStatus" class="analytics-status" role="status" aria-live="polite">Loading recorded data…</p>
+              <p id="analyticsPeriod" class="analytics-period"></p>
+              <div id="analyticsMetrics" class="analytics-metrics"></div>
+              <div class="analytics-columns">
+                <section><h3 id="analyticsTrendTitle">Sales and expenses by day</h3><div id="analyticsTrend" class="analytics-trend"></div></section>
+                <section><h3 id="analyticsCategoriesTitle">Expenses by category</h3><div id="analyticsCategories" class="analytics-list"></div></section>
+                <section><h3 id="analyticsProductsTitle">Top products by recorded revenue</h3><div id="analyticsProducts" class="analytics-list"></div></section>
+              </div>
+              <p id="analyticsComparison" class="analytics-note"></p>
+              <section class="analytics-coverage">
+                <h3 id="analyticsCoverageTitle">Data coverage and limits</h3>
+                <p id="analyticsCoverageSummary"></p>
+                <ul id="analyticsCoverageNotes"></ul>
+              </section>
+            </section>
+
             <section class="assistant-panel" id="assistantPanel" aria-labelledby="assistantTitle">
               <div class="assistant-intro">
                 <span class="assistant-sparkle" aria-hidden="true">✦</span>
@@ -210,6 +242,7 @@
                 <label class="advanced-scenario-field">Offer discount (%)<input type="number" id="twinDiscount" value="0" min="0" max="100" step="1" inputmode="numeric"></label>
                 <button class="button-primary" type="submit">Show me the estimate <span aria-hidden="true">→</span></button>
               </form>
+              <p class="twin-historical-baseline" id="twinHistoricalBaseline" role="status">Choose a product with recorded sales to see a recent historical reference. Historical figures are context, not a forecast.</p>
               <p class="form-error" id="twinError" role="alert" hidden></p>
               <div class="twin-result" id="twinResult" aria-live="polite">
                 <p class="eyebrow">ESTIMATES, NOT A PROMISE · BASED ON YOUR INPUTS</p>
@@ -350,6 +383,40 @@
               <label class="inline-select">Merchant access token <input id="backendToken" type="password" autocomplete="off" placeholder="Paste a configured merchant token"></label>
               <div class="dialog-actions"><button class="button-primary" id="connectBackend" type="button">Connect and load records</button><button class="outline-button" id="disconnectBackend" type="button">Disconnect</button></div>
               <p id="backendStatus" role="status" aria-live="polite">Not connected. This preview continues to work with local browser storage.</p>
+            </div>
+            <div class="settings-card data-tools-card" id="dataToolsSettings" hidden>
+              <h2 id="dataToolsTitle">Import and export business data</h2>
+              <p id="dataToolsDescription">CSV imports are previewed before saving. Dates use YYYY-MM-DD and money uses decimal amounts with up to two decimal places. Imported historical sales do not change current stock.</p>
+              <div class="data-tools-controls">
+                <label class="inline-select" id="importTypeLabel">Record type
+                  <select id="importRecordType"><option value="sales">Sales</option><option value="expenses">Expenses</option><option value="products">Products</option></select>
+                </label>
+                <button type="button" class="outline-button" id="downloadCsvTemplate">Download CSV template</button>
+              </div>
+              <label class="inline-select" id="importFileLabel">CSV file <input id="importCsvFile" type="file" accept=".csv,text/csv"></label>
+              <button type="button" class="button-primary" id="previewCsvImport">Preview CSV</button>
+              <p id="csvImportStatus" role="status" aria-live="polite"></p>
+              <div id="csvImportMapping" class="csv-import-mapping" hidden>
+                <h3 id="csvMappingTitle">Map source columns</h3>
+                <div id="csvMappingFields"></div>
+                <button type="button" class="outline-button" id="validateCsvMapping">Validate this mapping</button>
+              </div>
+              <div id="csvImportPreview" class="csv-import-preview" hidden>
+                <p id="csvPreviewSummary"></p>
+                <div id="csvPreviewRows"></div>
+                <button type="button" class="button-primary" id="confirmCsvImport" hidden>Import valid rows</button>
+              </div>
+              <hr>
+              <h3 id="csvExportTitle">Export records</h3>
+              <div class="data-tools-controls">
+                <label class="inline-select" id="exportTypeLabel">Export type
+                  <select id="exportRecordType"><option value="sales">Sales</option><option value="expenses">Expenses</option><option value="products">Products</option></select>
+                </label>
+                <label id="exportStartLabel">From <input id="exportStartDate" type="date"></label>
+                <label id="exportEndLabel">To <input id="exportEndDate" type="date"></label>
+                <button type="button" class="outline-button" id="exportCsvRecords">Download CSV</button>
+              </div>
+              <p>Sales and expense exports require a date range of at most 366 days. Product exports contain the current catalog and stock counts.</p>
             </div>
             <div class="settings-card"><h2>Your information</h2><p id="localDataDescription">Sales, expenses, products, drafts and preferences are saved locally on this device. Demo data is separate from your own records.</p><button class="outline-button" id="resetButton">Clear my saved information</button></div>
             <div class="settings-card"><h2>Language</h2><p>Pick a language you're comfortable using.</p><label class="inline-select">App language <select id="settingsLanguage"><option value="en">English</option><option value="hi">हिन्दी</option></select></label></div>

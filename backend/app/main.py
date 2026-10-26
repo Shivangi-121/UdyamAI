@@ -7,6 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.api.routes import router
 from app.core.config import get_settings
+from app.services.csv_data import MAX_CSV_BYTES
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("udyamai")
@@ -19,6 +20,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+    expose_headers=["Content-Disposition"],
 )
 
 
@@ -30,6 +32,8 @@ async def limit_request_size(request: Request, call_next):
             max_bytes = (
                 settings.sarvam_max_audio_bytes + 65_536
                 if request.url.path.endswith("/assistant/voice")
+                else MAX_CSV_BYTES + 65_536
+                if request.url.path.endswith(("/imports/preview", "/imports/confirm"))
                 else settings.max_request_bytes
             )
             too_large = int(content_length) > max_bytes

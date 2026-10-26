@@ -18,6 +18,12 @@ let insightLoading = false;
 let insightError = '';
 let conversationHistory = [];
 let accountProfile = window.UdyamAPI.profile();
+let merchantCurrency = accountProfile?.currency || 'INR';
+let analyticsRefreshTimer = null;
+let analyticsRequestId = 0;
+let selectedImportFile = null;
+let currentImportPreview = null;
+let twinDemandWasAutoFilled = false;
 let pendingResetToken = new URLSearchParams(window.location.search).get('reset_token');
 document.body.classList.add('auth-required');
 if (pendingResetToken) {
@@ -63,6 +69,7 @@ function applyTheme(theme = state.theme) {
 function applyAccountProfile(profile) {
   accountProfile = profile || null;
   if (!accountProfile) return;
+  merchantCurrency = accountProfile.currency || 'INR';
   state.language = accountProfile.preferred_language === 'en' ? 'en' : 'hi';
   state.mode = accountProfile.response_detail === 'simple'
     ? 'simple'
@@ -117,6 +124,7 @@ async function saveAccountProfile(payload, status = null) {
 }
 
 function applyBackendRecords(records, merchantId) {
+  merchantCurrency = records.merchant.currency || accountProfile?.currency || 'INR';
   if (window.UdyamAPI.authenticated()) {
     window.UdyamStore.attachMerchant(merchantId, records.merchant);
     if (records.profile) applyAccountProfile(records.profile);
@@ -223,7 +231,7 @@ try {
 }
 const money = value => new Intl.NumberFormat(state.language === 'hi' ? 'en-IN' : 'en-IN', {
   style: 'currency',
-  currency: accountProfile?.currency || 'INR',
+  currency: accountProfile?.currency || merchantCurrency || 'INR',
   maximumFractionDigits: 2
 }).format(value);
 const today = () => window.UdyamData.date(0);
@@ -537,6 +545,8 @@ function render() {
   if ($('#campaignStorageLabel')) {
     $('#campaignStorageLabel').textContent = window.UdyamAPI.connected() ? 'BACKEND SAVED DRAFTS' : 'SAVED ON THIS DEVICE';
   }
+  if ($('#dataToolsSettings')) $('#dataToolsSettings').hidden = !window.UdyamAPI.connected() || state.sample;
+  if ($('#analyticsPanel')) $('#analyticsPanel').hidden = !window.UdyamAPI.connected() || state.sample;
   if ($('#assistantModeNote')) {
     $('#assistantModeNote').textContent = window.UdyamAPI.connected()
       ? backendAiMode === 'live'
@@ -602,6 +612,10 @@ function render() {
   renderDemoInsights();
   renderProducts();
   renderMarginInsights();
+  if (window.UdyamAPI.connected() && !state.sample) {
+    clearTimeout(analyticsRefreshTimer);
+    analyticsRefreshTimer = setTimeout(() => { void refreshAnalytics(); }, 250);
+  }
   $$('.advanced-panel').forEach(panel => { panel.hidden = state.mode !== 'advanced'; });
   updateTwin();
   applyLanguage();
@@ -648,6 +662,231 @@ function renderRecordedInsights() {
   });
 }
 
+function analyticsDateRange() {
+  const todayKey = window.UdyamData.date(0);
+  const atNoon = new Date(`${todayKey}T12:00:00`);
+  const format = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  const range = $('#analyticsRange').value;
+  if (range === 'custom') {
+    return { start: $('#analyticsStartDate').value, end: $('#analyticsEndDate').value };
+  }
+  if (range === 'today') return { start: todayKey, end: todayKey };
+  if (range === '7' || range === '30') {
+    const start = new Date(atNoon);
+    start.setDate(start.getDate() - Number(range) + 1);
+    return { start: format(start), end: todayKey };
+  }
+  if (range === 'month') return { start: format(new Date(atNoon.getFullYear(), atNoon.getMonth(), 1)), end: todayKey };
+  const firstOfThisMonth = new Date(atNoon.getFullYear(), atNoon.getMonth(), 1);
+  const previousMonth = new Date(atNoon.getFullYear(), atNoon.getMonth() - 1, 1);
+  return {
+    start: format(previousMonth),
+    end: format(new Date(firstOfThisMonth.getFullYear(), firstOfThisMonth.getMonth(), 0))
+  };
+}
+
+function analyticsMoney(value, currency) {
+  if (value === null || value === undefined) return 'Not available';
+  try {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency }).format(Number(value));
+  } catch {
+    return `${currency} ${Number(value).toFixed(2)}`;
+  }
+}
+
+function appendAnalyticsList(container, entries, valueKey, labelKey, currency) {
+  container.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement('p');
+    empty.className = 'analytics-status';
+    empty.textContent = 'No records for this period.';
+    container.append(empty);
+    return;
+  }
+  entries.forEach(entry => {
+    const row = document.createElement('div');
+    row.className = 'analytics-list-row';
+    const name = document.createElement('span');
+    name.textContent = entry[labelKey];
+    const amount = document.createElement('strong');
+    amount.textContent = analyticsMoney(entry[valueKey], currency);
+    row.append(name, amount);
+    container.append(row);
+  });
+}
+
+function renderAnalytics(data) {
+  const currency = data.currency || 'INR';
+  const metrics = data.metrics;
+  const summaryMetrics = [
+    ['Revenue', metrics.revenue],
+    ['Recorded expenses', metrics.recorded_expenses],
+    ['Gross profit', metrics.gross_profit],
+    ['Net profit', metrics.net_profit],
+    ['Average recorded sale', metrics.average_sale_value]
+  ];
+  const metricContainer = $('#analyticsMetrics');
+  metricContainer.replaceChildren();
+  summaryMetrics.forEach(([label, value]) => {
+    const card = document.createElement('article');
+    card.className = 'analytics-metric';
+    const title = document.createElement('small');
+    title.textContent = label;
+    const amount = document.createElement('strong');
+    amount.textContent = analyticsMoney(value, currency);
+    card.append(title, amount);
+    metricContainer.append(card);
+  });
+  $('#analyticsPeriod').textContent = `Recorded data from ${data.start_date} through ${data.end_date} · ${currency} · ${metrics.sales_count} sales and ${metrics.expenses_count} expenses`;
+
+  const trend = $('#analyticsTrend');
+  trend.replaceChildren();
+  const peak = Math.max(1, ...data.trend.flatMap(item => [Number(item.sales), Number(item.expenses)]));
+  const hasActivity = metrics.sales_count > 0 || metrics.expenses_count > 0;
+  if (!hasActivity) {
+    const empty = document.createElement('p');
+    empty.className = 'analytics-status';
+    empty.textContent = 'No sales or expenses were recorded in this date range.';
+    trend.append(empty);
+  } else {
+    data.trend.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'analytics-trend-row';
+      const label = document.createElement('span');
+      label.textContent = item.date.slice(5);
+      const bars = document.createElement('div');
+      bars.className = 'analytics-trend-bars';
+      [['sales', item.sales], ['expense', item.expenses]].forEach(([kind, value]) => {
+        const track = document.createElement('div');
+        track.className = 'analytics-bar-track';
+        const bar = document.createElement('span');
+        if (kind === 'expense') bar.className = 'expense';
+        bar.style.width = `${Number(value) / peak * 100}%`;
+        bar.setAttribute('aria-label', `${kind}: ${analyticsMoney(value, currency)}`);
+        track.append(bar);
+        bars.append(track);
+      });
+      const total = document.createElement('strong');
+      total.textContent = analyticsMoney(item.sales, currency);
+      row.append(label, bars, total);
+      trend.append(row);
+    });
+  }
+  appendAnalyticsList($('#analyticsCategories'), data.expenses_by_category, 'amount', 'category', currency);
+  appendAnalyticsList($('#analyticsProducts'), data.best_performing_products, 'revenue', 'name', currency);
+  const comparison = data.comparison.available
+    ? `Previous comparable date range (${data.comparison.previous_period.start_date} to ${data.comparison.previous_period.end_date}): ${analyticsMoney(data.comparison.previous_period.revenue, currency)} recorded revenue and ${analyticsMoney(data.comparison.previous_period.recorded_expenses, currency)} recorded expenses. ${data.comparison.warning}`
+    : 'Period-over-period comparison is unavailable until records cover the full previous period.';
+  $('#analyticsComparison').textContent = comparison;
+
+  const coverage = data.coverage;
+  $('#analyticsCoverageSummary').textContent = [
+    `Sales recorded: ${coverage.sales_recorded ? 'yes' : 'no'}`,
+    `expenses recorded: ${coverage.expenses_recorded ? 'yes' : 'no'}`,
+    `product costs: ${coverage.products_with_cost} of ${coverage.product_count}`,
+    `inventory configured: ${coverage.inventory_configured ? 'yes' : 'no'}`,
+    `history: ${coverage.period_start || 'none'}${coverage.period_end ? ` to ${coverage.period_end}` : ''}`
+  ].join(' · ');
+  const coverageNotes = $('#analyticsCoverageNotes');
+  coverageNotes.replaceChildren();
+  [...coverage.missing_information, ...coverage.suggestions].forEach(note => {
+    const item = document.createElement('li');
+    item.textContent = note;
+    coverageNotes.append(item);
+  });
+}
+
+async function refreshAnalytics() {
+  if (!window.UdyamAPI.connected() || state.sample) return;
+  const range = analyticsDateRange();
+  if (!range.start || !range.end || range.start > range.end) {
+    $('#analyticsStatus').textContent = 'Choose a valid start and end date.';
+    return;
+  }
+  const requestId = ++analyticsRequestId;
+  $('#analyticsStatus').textContent = 'Loading recorded analytics…';
+  try {
+    const data = await window.UdyamAPI.analytics(range.start, range.end);
+    if (requestId !== analyticsRequestId) return;
+    renderAnalytics(data);
+    $('#analyticsStatus').textContent = '';
+  } catch (error) {
+    if (requestId === analyticsRequestId) {
+      $('#analyticsStatus').textContent = `Could not load analytics: ${error.message}`;
+    }
+  }
+}
+
+function renderCsvImportPreview(preview) {
+  currentImportPreview = preview;
+  $('#csvImportMapping').hidden = false;
+  $('#csvImportPreview').hidden = false;
+  $('#csvImportStatus').textContent = 'Review the column mapping, row checks, and records before importing.';
+  const fields = $('#csvMappingFields');
+  fields.replaceChildren();
+  preview.supported_fields.forEach(field => {
+    const label = document.createElement('label');
+    const hindiFieldLabels = {
+      date: 'तारीख', amount: 'रकम', quantity: 'मात्रा', product_name: 'उत्पाद का नाम',
+      unit_price: 'प्रति इकाई कीमत', cost_of_goods: 'बेचे गए सामान की लागत', note: 'नोट',
+      category: 'श्रेणी', name: 'नाम', cost: 'लागत', price: 'कीमत',
+      supplier_lead_time_days: 'आपूर्ति में दिन'
+    };
+    label.textContent = state.language === 'hi' ? hindiFieldLabels[field] : field.replaceAll('_', ' ');
+    const select = document.createElement('select');
+    select.dataset.field = field;
+    select.add(new Option(state.language === 'hi' ? 'मिलान न करें' : 'Do not map', ''));
+    preview.headers.forEach(header => select.add(new Option(header, header)));
+    select.value = preview.mapping[field] || '';
+    label.append(select);
+    fields.append(label);
+  });
+
+  const summary = $('#csvPreviewSummary');
+  summary.textContent = `Ready: ${preview.valid_count} · Skipped as duplicates: ${preview.skipped_count} · Need correction: ${preview.invalid_count}`;
+  if (preview.required_fields_missing.length) {
+    summary.textContent += ` · Required columns still unmapped: ${preview.required_fields_missing.join(', ')}`;
+  }
+  const rows = $('#csvPreviewRows');
+  rows.replaceChildren();
+  preview.preview_records.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'csv-preview-row';
+    row.textContent = `Row ${item.row}: ${Object.entries(item.record).map(([key, value]) => `${key.replaceAll('_', ' ')}: ${value ?? ''}`).join(' · ')}`;
+    rows.append(row);
+  });
+  preview.row_issues.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'csv-preview-row csv-preview-issues';
+    row.textContent = `Row ${item.row} · ${item.status}: ${item.errors.join(' ')}`;
+    rows.append(row);
+  });
+  if (!preview.preview_records.length && !preview.row_issues.length) {
+    const empty = document.createElement('p');
+    empty.className = 'analytics-status';
+    empty.textContent = 'No data rows found in this CSV.';
+    rows.append(empty);
+  }
+  $('#confirmCsvImport').hidden = preview.valid_count === 0 || preview.required_fields_missing.length > 0;
+  $('#confirmCsvImport').textContent = `Import ${preview.valid_count} valid row${preview.valid_count === 1 ? '' : 's'}`;
+}
+
+function csvMappingFromControls() {
+  return Object.fromEntries(
+    [...$('#csvMappingFields').querySelectorAll('select')]
+      .filter(select => select.value)
+      .map(select => [select.dataset.field, select.value])
+  );
+}
+
+function clearCsvImportPreview() {
+  selectedImportFile = $('#importCsvFile').files[0] || null;
+  currentImportPreview = null;
+  $('#csvImportMapping').hidden = true;
+  $('#csvImportPreview').hidden = true;
+  $('#csvImportStatus').textContent = '';
+}
+
 function renderTransactions() {
   const container = $('#transactionList');
   container.replaceChildren();
@@ -690,9 +929,69 @@ function renderSaleOptions() {
       if (Number.isFinite(selectedProduct.cost)) $('#twinCost').value = selectedProduct.cost;
       if (Number.isFinite(selectedProduct.price)) $('#twinPrice').value = selectedProduct.price;
       if (Number.isFinite(selectedProduct.quantity)) $('#twinInventory').value = selectedProduct.quantity;
+      setTwinDemandFromHistory(selectedProduct);
     }
   }
   scenarioMerchantId = state.currentMerchantId;
+  renderTwinHistoricalBaseline();
+}
+
+function productSalesBaseline(product) {
+  const startDate = window.UdyamData.date(29);
+  const endDate = window.UdyamData.date(0);
+  const sales = state.sales.filter(item => item.productId === product.id && item.date >= startDate && item.date <= endDate);
+  return {
+    startDate,
+    endDate,
+    sales,
+    units: sales.reduce((sum, item) => sum + (item.quantity || 0), 0),
+    revenue: sales.reduce((sum, item) => sum + item.amount, 0),
+    costsComplete: sales.length > 0 && sales.every(item => Number.isFinite(item.costOfGoods)),
+    grossProfit: sales.every(item => Number.isFinite(item.costOfGoods))
+      ? sales.reduce((sum, item) => sum + item.amount - item.costOfGoods, 0)
+      : null
+  };
+}
+
+function setTwinDemandFromHistory(product) {
+  const baseline = productSalesBaseline(product);
+  if (baseline.units > 0) {
+    $('#twinDemand').value = Math.round(baseline.units / 30);
+    twinDemandWasAutoFilled = true;
+  } else if (twinDemandWasAutoFilled) {
+    $('#twinDemand').value = 16;
+    twinDemandWasAutoFilled = false;
+  }
+}
+
+function renderTwinHistoricalBaseline() {
+  const product = state.products.find(item => item.id === $('#twinProduct').value);
+  const output = $('#twinHistoricalBaseline');
+  const hindi = state.language === 'hi';
+  if (!product) {
+    output.textContent = hindi
+      ? 'हाल के रिकॉर्ड देखने के लिए बिक्री वाले उत्पाद को चुनें। ये पुराने आँकड़े संदर्भ हैं, अनुमान नहीं।'
+      : 'Choose a product with recorded sales to see a recent historical reference. Historical figures are context, not a forecast.';
+    return;
+  }
+  const baseline = productSalesBaseline(product);
+  if (!baseline.sales.length) {
+    output.textContent = hindi
+      ? `${product.name}: ${baseline.startDate} से ${baseline.endDate} तक बिक्री रिकॉर्ड नहीं हैं। मांग मान स्वयं दर्ज करें।`
+      : `${product.name}: no linked sale records from ${baseline.startDate} to ${baseline.endDate}. Enter a demand assumption; missing history is not treated as zero.`;
+    return;
+  }
+  const averageUnits = (baseline.units / 30).toFixed(2);
+  const profit = baseline.costsComplete
+    ? hindi
+      ? ` दर्ज सकल लाभ: ${analyticsMoney(baseline.grossProfit, merchantCurrency)} (अन्य खर्च शामिल नहीं)।`
+      : ` Recorded gross profit: ${analyticsMoney(baseline.grossProfit, merchantCurrency)} (excludes other expenses).`
+    : hindi
+      ? ' ऐतिहासिक लागत अधूरी है, इसलिए सकल लाभ उपलब्ध नहीं है।'
+      : ' Gross profit is unavailable because historical sale costs are incomplete.';
+  output.textContent = hindi
+    ? `${product.name} का ऐतिहासिक संदर्भ, ${baseline.startDate} से ${baseline.endDate}: ${baseline.sales.length} बिक्री में ${baseline.units} इकाइयाँ, ${analyticsMoney(baseline.revenue, merchantCurrency)} दर्ज बिक्री, और प्रति दिन ${averageUnits} दर्ज इकाइयाँ।${profit} उत्पाद चुनने पर निकटतम पूर्ण इकाई का दैनिक औसत संपादन योग्य मांग मान बनता है। रिकॉर्ड अधूरे हो सकते हैं; यह अनुमान नहीं है।`
+    : `Historical reference for ${product.name}, ${baseline.startDate} to ${baseline.endDate}: ${baseline.units} units across ${baseline.sales.length} sale records, ${analyticsMoney(baseline.revenue, merchantCurrency)} revenue, ${averageUnits} recorded units per calendar day.${profit} Selecting this product uses the nearest whole-unit daily average as the editable demand assumption. Records may be incomplete; this is not a forecast.`;
 }
 
 function renderDemoInsights() {
@@ -746,6 +1045,28 @@ function applyLanguage() {
     '#twinTitle': 'एक नया विचार आज़माएँ',
     '#insightsTitle': 'कारोबार की जानकारी',
     '#settingsTitle': 'सेटिंग्स',
+    '#analyticsEyebrow': 'दर्ज कारोबार की जानकारी · अनुमान नहीं',
+    '#analyticsTitle': 'कारोबार का विश्लेषण',
+    '#analyticsRangeLabel': 'अवधि',
+    '#analyticsStartLabel': 'शुरुआत',
+    '#analyticsEndLabel': 'अंत',
+    '#analyticsTrendTitle': 'दिन के अनुसार बिक्री और खर्च',
+    '#analyticsCategoriesTitle': 'खर्च की श्रेणी',
+    '#analyticsProductsTitle': 'दर्ज बिक्री से शीर्ष उत्पाद',
+    '#analyticsCoverageTitle': 'डेटा कवरेज और सीमाएँ',
+    '#dataToolsTitle': 'कारोबार का डेटा आयात और निर्यात',
+    '#dataToolsDescription': 'CSV सहेजने से पहले दिखाई जाएगी। तारीख YYYY-MM-DD और रकम अधिकतम दो दशमलव में लिखें। पुराने बिक्री रिकॉर्ड से मौजूदा स्टॉक नहीं बदलेगा।',
+    '#importTypeLabel': 'रिकॉर्ड का प्रकार',
+    '#importFileLabel': 'CSV फ़ाइल',
+    '#previewCsvImport': 'CSV देखें',
+    '#csvMappingTitle': 'कॉलम का मिलान करें',
+    '#validateCsvMapping': 'इस मिलान की जाँच करें',
+    '#csvExportTitle': 'रिकॉर्ड निर्यात करें',
+    '#exportTypeLabel': 'निर्यात का प्रकार',
+    '#exportStartLabel': 'शुरुआत',
+    '#exportEndLabel': 'अंत',
+    '#exportCsvRecords': 'CSV डाउनलोड करें',
+    '#downloadCsvTemplate': 'CSV नमूना डाउनलोड करें',
     '#saleDialogTitle': 'आज की बिक्री लिखें',
     '#saleAmount': 'उदाहरण: 500',
     '#productName': 'उदाहरण: चावल',
@@ -778,6 +1099,28 @@ function applyLanguage() {
     '#twinTitle': 'Try a business idea',
     '#insightsTitle': 'Business insights',
     '#settingsTitle': 'Settings',
+    '#analyticsEyebrow': 'MERCHANT RECORDS · NOT A FORECAST',
+    '#analyticsTitle': 'Business analytics',
+    '#analyticsRangeLabel': 'Period',
+    '#analyticsStartLabel': 'From',
+    '#analyticsEndLabel': 'To',
+    '#analyticsTrendTitle': 'Sales and expenses by day',
+    '#analyticsCategoriesTitle': 'Expenses by category',
+    '#analyticsProductsTitle': 'Top products by recorded revenue',
+    '#analyticsCoverageTitle': 'Data coverage and limits',
+    '#dataToolsTitle': 'Import and export business data',
+    '#dataToolsDescription': 'CSV imports are previewed before saving. Dates use YYYY-MM-DD and money uses decimal amounts with up to two decimal places. Imported historical sales do not change current stock.',
+    '#importTypeLabel': 'Record type',
+    '#importFileLabel': 'CSV file',
+    '#previewCsvImport': 'Preview CSV',
+    '#csvMappingTitle': 'Map source columns',
+    '#validateCsvMapping': 'Validate this mapping',
+    '#csvExportTitle': 'Export records',
+    '#exportTypeLabel': 'Export type',
+    '#exportStartLabel': 'From',
+    '#exportEndLabel': 'To',
+    '#exportCsvRecords': 'Download CSV',
+    '#downloadCsvTemplate': 'Download CSV template',
     '#saleDialogTitle': 'Record today’s sale',
     '#saleAmount': 'e.g. 500',
     '#productName': 'e.g. Rice',
@@ -802,6 +1145,16 @@ function applyLanguage() {
     }
     else if (selector === '.send-button' || selector === '#startOnboarding') element.textContent = value;
     else element.textContent = value;
+  });
+  const analyticsOptions = hi
+    ? ['आज', 'पिछले 7 दिन', 'पिछले 30 दिन', 'इस महीने', 'पिछला महीना', 'तारीख चुनें']
+    : ['Today', 'Last 7 days', 'Last 30 days', 'This month', 'Previous month', 'Custom range'];
+  $$('#analyticsRange option').forEach((option, index) => { option.textContent = analyticsOptions[index]; });
+  const recordTypeOptions = hi
+    ? ['बिक्री', 'खर्च', 'उत्पाद']
+    : ['Sales', 'Expenses', 'Products'];
+  $$('#importRecordType option, #exportRecordType option').forEach((option, index) => {
+    option.textContent = recordTypeOptions[index];
   });
   navLabel('.sidebar .nav-item[data-page="home"]', hi ? 'होम' : 'Home');
   navLabel('.sidebar .nav-item[data-page="stock"]', hi ? 'मेरा स्टॉक' : 'My stock');
@@ -1994,6 +2347,132 @@ $('#connectBackend').addEventListener('click', async () => {
   }
 });
 
+const defaultAnalyticsEnd = window.UdyamData.date(0);
+const defaultAnalyticsStart = window.UdyamData.date(29);
+$('#analyticsStartDate').value = defaultAnalyticsStart;
+$('#analyticsEndDate').value = defaultAnalyticsEnd;
+$('#exportStartDate').value = defaultAnalyticsStart;
+$('#exportEndDate').value = defaultAnalyticsEnd;
+
+$('#analyticsRange').addEventListener('change', () => {
+  const custom = $('#analyticsRange').value === 'custom';
+  $('#analyticsCustomRange').hidden = !custom;
+  if (custom) {
+    if (!$('#analyticsStartDate').value) $('#analyticsStartDate').value = defaultAnalyticsStart;
+    if (!$('#analyticsEndDate').value) $('#analyticsEndDate').value = defaultAnalyticsEnd;
+  } else {
+    void refreshAnalytics();
+  }
+});
+$('#applyAnalyticsRange').addEventListener('click', () => { void refreshAnalytics(); });
+
+$('#importCsvFile').addEventListener('change', clearCsvImportPreview);
+$('#importRecordType').addEventListener('change', clearCsvImportPreview);
+$('#previewCsvImport').addEventListener('click', async () => {
+  selectedImportFile = $('#importCsvFile').files[0] || null;
+  const recordType = $('#importRecordType').value;
+  if (!selectedImportFile) {
+    $('#csvImportStatus').textContent = 'Choose a CSV file to preview.';
+    return;
+  }
+  const button = $('#previewCsvImport');
+  button.disabled = true;
+  $('#csvImportStatus').textContent = 'Checking the CSV without saving any records…';
+  try {
+    const preview = await window.UdyamAPI.previewImport(selectedImportFile, recordType);
+    renderCsvImportPreview(preview);
+  } catch (error) {
+    $('#csvImportStatus').textContent = `Could not preview CSV: ${error.message}`;
+    $('#csvImportMapping').hidden = true;
+    $('#csvImportPreview').hidden = true;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#validateCsvMapping').addEventListener('click', async () => {
+  if (!selectedImportFile) {
+    $('#csvImportStatus').textContent = 'Choose the CSV file again before validating its mapping.';
+    return;
+  }
+  const button = $('#validateCsvMapping');
+  button.disabled = true;
+  $('#csvImportStatus').textContent = 'Validating mapped rows…';
+  try {
+    const preview = await window.UdyamAPI.previewImport(
+      selectedImportFile,
+      $('#importRecordType').value,
+      csvMappingFromControls()
+    );
+    renderCsvImportPreview(preview);
+  } catch (error) {
+    $('#csvImportStatus').textContent = `Could not validate this mapping: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#confirmCsvImport').addEventListener('click', async () => {
+  if (!selectedImportFile || !currentImportPreview || !currentImportPreview.valid_count) return;
+  const count = currentImportPreview.valid_count;
+  if (!window.confirm(`Import ${count} valid row${count === 1 ? '' : 's'} into this merchant account? Invalid and duplicate rows will not be saved.`)) return;
+  const button = $('#confirmCsvImport');
+  button.disabled = true;
+  $('#csvImportStatus').textContent = 'Importing the confirmed records…';
+  try {
+    const result = await window.UdyamAPI.confirmImport(
+      selectedImportFile,
+      $('#importRecordType').value,
+      currentImportPreview.mapping,
+      currentImportPreview.preview_digest
+    );
+    const issueText = [
+      ...result.skipped_rows.slice(0, 10).map(item => `Row ${item.row} skipped: ${item.reasons.join(' ')}`),
+      ...result.failed_rows.slice(0, 10).map(item => `Row ${item.row} failed: ${item.errors.join(' ')}`)
+    ].join(' ');
+    $('#csvImportStatus').textContent = `Import complete: ${result.imported_count} imported, ${result.skipped_count} skipped, ${result.failed_count} failed.${result.inventory_note ? ` ${result.inventory_note}` : ''}${issueText ? ` ${issueText}` : ''}`;
+    currentImportPreview = null;
+    $('#csvImportMapping').hidden = true;
+    $('#csvImportPreview').hidden = true;
+    const records = await window.UdyamAPI.loadRecords();
+    applyBackendRecords(records, state.currentMerchantId);
+    render();
+    await refreshAnalytics();
+  } catch (error) {
+    $('#csvImportStatus').textContent = `Import did not complete: ${error.message}`;
+  } finally {
+    button.disabled = false;
+  }
+});
+
+$('#downloadCsvTemplate').addEventListener('click', async () => {
+  try {
+    await window.UdyamAPI.downloadTemplate($('#importRecordType').value);
+  } catch (error) {
+    $('#csvImportStatus').textContent = `Could not download template: ${error.message}`;
+  }
+});
+
+$('#exportRecordType').addEventListener('change', () => {
+  const productExport = $('#exportRecordType').value === 'products';
+  $('#exportStartDate').disabled = productExport;
+  $('#exportEndDate').disabled = productExport;
+});
+$('#exportCsvRecords').addEventListener('click', async () => {
+  const startDate = $('#exportStartDate').value;
+  const endDate = $('#exportEndDate').value;
+  if ($('#exportRecordType').value !== 'products' && (!startDate || !endDate || startDate > endDate)) {
+    $('#csvImportStatus').textContent = 'Choose a valid export start and end date.';
+    return;
+  }
+  try {
+    await window.UdyamAPI.exportCsv($('#exportRecordType').value, startDate, endDate);
+    $('#csvImportStatus').textContent = 'CSV export downloaded.';
+  } catch (error) {
+    $('#csvImportStatus').textContent = `Could not export CSV: ${error.message}`;
+  }
+});
+
 $('#disconnectBackend').addEventListener('click', () => {
   window.UdyamAPI.disconnect();
   conversationHistory = [];
@@ -2416,14 +2895,20 @@ $('#twinForm').addEventListener('submit', async event => {
   } else updateTwin();
   showToast('Estimate updated with your numbers.');
 });
-['twinQuantity', 'twinCost', 'twinPrice', 'twinInventory', 'twinDemand', 'twinPeriod', 'twinDiscount'].forEach(id => $(`#${id}`).addEventListener('input', () => updateTwin()));
+['twinQuantity', 'twinCost', 'twinPrice', 'twinInventory', 'twinPeriod', 'twinDiscount'].forEach(id => $(`#${id}`).addEventListener('input', () => updateTwin()));
+$('#twinDemand').addEventListener('input', () => {
+  twinDemandWasAutoFilled = false;
+  updateTwin();
+});
 $('#twinProduct').addEventListener('change', () => {
   const product = state.products.find(item => item.id === $('#twinProduct').value);
   if (product) {
     if (Number.isFinite(product.cost)) $('#twinCost').value = product.cost;
     if (Number.isFinite(product.price)) $('#twinPrice').value = product.price;
     if (Number.isFinite(product.quantity)) $('#twinInventory').value = product.quantity;
+    setTwinDemandFromHistory(product);
   }
+  renderTwinHistoricalBaseline();
   updateTwin();
 });
 $('#saveScenarioButton').addEventListener('click', async () => {

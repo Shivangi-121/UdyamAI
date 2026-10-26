@@ -49,7 +49,7 @@ def simulate_scenario(input: ScenarioInput) -> ScenarioResult:
         input.discount,
     )
     assumptions = [
-        f"Demand is user-provided at {input.demand_per_day} units per day for {input.period} days.",
+        f"The entered demand assumption is {input.demand_per_day} units per day for {input.period} days.",
         "Units sold are capped by available stock; no historical demand forecast is inferred.",
         "Gross profit is revenue less cost of goods sold and excludes other expenses.",
     ]
@@ -76,16 +76,42 @@ def simulate_scenario(input: ScenarioInput) -> ScenarioResult:
     )
 
 
-def recorded_metrics(sales: Sequence[Sale], expenses: Sequence[Expense]) -> dict:
-    revenue = money(sum((sale.amount for sale in sales), Decimal("0")))
-    cogs_known = bool(sales) and all(sale.cost_of_goods is not None for sale in sales)
-    cogs = money(sum((sale.cost_of_goods or Decimal("0") for sale in sales), Decimal("0")))
-    recorded_expenses = money(sum((expense.amount for expense in expenses), Decimal("0")))
+def aggregate_metrics(
+    sales_count: int,
+    revenue: Decimal,
+    costed_sales_count: int,
+    cost_of_goods: Decimal,
+    expenses_count: int,
+    recorded_expenses: Decimal,
+) -> dict:
+    revenue = money(revenue)
+    cogs_known = sales_count > 0 and costed_sales_count == sales_count
+    cost_of_goods = money(cost_of_goods)
+    recorded_expenses = money(recorded_expenses)
+    missing_information = (
+        ["No sales are recorded for this period; profit is unavailable."]
+        if sales_count == 0
+        else ["Cost of goods is missing for one or more sales."]
+        if not cogs_known
+        else []
+    )
     return {
-        "sales_count": len(sales),
+        "sales_count": sales_count,
+        "expenses_count": expenses_count,
         "revenue": str(revenue),
         "recorded_expenses": str(recorded_expenses),
-        "gross_profit": str(money(revenue - cogs)) if cogs_known else None,
+        "gross_profit": str(money(revenue - cost_of_goods)) if cogs_known else None,
         "gross_profit_available": cogs_known,
-        "missing_information": [] if cogs_known else ["Unit cost is missing for one or more sales."],
+        "missing_information": missing_information,
     }
+
+
+def recorded_metrics(sales: Sequence[Sale], expenses: Sequence[Expense]) -> dict:
+    return aggregate_metrics(
+        sales_count=len(sales),
+        revenue=sum((sale.amount for sale in sales), Decimal("0")),
+        costed_sales_count=sum(sale.cost_of_goods is not None for sale in sales),
+        cost_of_goods=sum((sale.cost_of_goods or Decimal("0") for sale in sales), Decimal("0")),
+        expenses_count=len(expenses),
+        recorded_expenses=sum((expense.amount for expense in expenses), Decimal("0")),
+    )

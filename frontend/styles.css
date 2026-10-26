@@ -139,4 +139,39 @@ body.auth-required #accountDialog::backdrop{background:var(--paper);opacity:1}
 body.auth-required #accountDialog .account-dialog{width:100%;max-width:none;padding:30px}
 body.auth-required #accountDialog .account-dialog>section:not([hidden]){margin-top:20px}
 body.auth-required #accountDialog .dialog-copy{color:var(--muted)}
+.analytics-panel,.data-tools-card{margin:0 0 24px;padding:20px;background:var(--white);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+.analytics-range-label,.analytics-custom-range label,.data-tools-controls label{display:grid;gap:5px;color:var(--muted);font-size:11px;font-weight:600}
+.analytics-range-label select,.analytics-custom-range input,.data-tools-controls input,.data-tools-card input[type=file],.data-tools-controls select{min-height:38px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--white);color:var(--ink)}
+.analytics-custom-range,.data-tools-controls{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:10px 0}
+.analytics-custom-range[hidden]{display:none}
+.analytics-status,.analytics-period,.analytics-note,.analytics-coverage p,.analytics-coverage li,.data-tools-card>p{color:var(--muted);font-size:12px}
+.analytics-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin:15px 0}
+.analytics-metric{padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--paper);min-width:0}
+.analytics-metric small,.analytics-metric strong{display:block}
+.analytics-metric small{color:var(--muted);font-size:10px}
+.analytics-metric strong{margin-top:4px;font-size:15px;overflow-wrap:anywhere}
+.analytics-columns{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:16px;margin:16px 0}
+.analytics-columns>section,.analytics-coverage{min-width:0;padding:13px;border:1px solid var(--line);border-radius:10px}
+.analytics-columns h3,.analytics-coverage h3,.data-tools-card h3{margin:0 0 10px;font-size:13px}
+.analytics-trend,.analytics-list{display:grid;gap:8px;max-height:280px;overflow:auto}
+.analytics-trend-row{display:grid;grid-template-columns:58px 1fr 82px;align-items:center;gap:7px;font-size:10px;color:var(--muted)}
+.analytics-trend-bars{display:grid;gap:3px}
+.analytics-bar-track{height:6px;background:var(--line);border-radius:5px;overflow:hidden}
+.analytics-bar-track span{display:block;height:100%;border-radius:5px;background:var(--teal)}
+.analytics-bar-track .expense{background:#c78458}
+.analytics-list-row{display:flex;justify-content:space-between;gap:8px;color:var(--ink);font-size:11px}
+.analytics-list-row span:first-child{overflow-wrap:anywhere}
+.analytics-coverage ul{margin:5px 0;padding-left:18px}
+.twin-historical-baseline{margin:12px 0;padding:11px 13px;border:1px solid var(--line);border-radius:9px;background:var(--paper);color:var(--muted);font-size:12px}
+.csv-import-mapping,.csv-import-preview{margin-top:14px;padding:13px;border:1px solid var(--line);border-radius:10px;background:var(--paper)}
+#csvMappingFields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-bottom:12px}
+#csvMappingFields label{display:grid;gap:5px;color:var(--muted);font-size:11px}
+#csvMappingFields select{width:100%;min-height:36px;border:1px solid var(--line);border-radius:7px;background:var(--white);color:var(--ink)}
+#csvPreviewRows{max-height:220px;overflow:auto}
+.csv-preview-row{padding:8px 0;border-top:1px solid var(--line);font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.csv-preview-issues{color:#a24a36}
+.data-tools-card hr{margin:18px 0;border:0;border-top:1px solid var(--line)}
+.data-tools-card button{margin-top:8px}
+html[data-theme="dark"] .analytics-metric,html[data-theme="dark"] .csv-import-mapping,html[data-theme="dark"] .csv-import-preview{background:var(--paper)}
 @media(max-width:760px){.theme-toggle{width:36px;height:36px}.profile-settings{padding:17px}.profile-choice-group{gap:10px}.account-dialog{max-height:calc(100vh - 24px);overflow:auto}}
+@media(max-width:760px){.analytics-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.analytics-columns{grid-template-columns:1fr}.analytics-range-label{width:100%}.analytics-range-label select{width:100%}.analytics-panel,.data-tools-card{padding:14px}#csvMappingFields{grid-template-columns:1fr}.analytics-trend-row{grid-template-columns:48px 1fr 70px}}

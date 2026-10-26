@@ -18,6 +18,7 @@ from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.responses import PlainTextResponse
 
 from app.core.config import get_settings
 from app.core.time import business_today
@@ -102,12 +103,24 @@ from app.services.auth import (
     verify_csrf,
 )
 from app.services.assistant import answer_question, generate_campaign
-from app.services.calculations import simulate_scenario
+from app.services.analytics import merchant_analytics
+from app.services.calculations import recorded_metrics, simulate_scenario
+from app.services.csv_data import (
+    FIELDS,
+    MAX_CSV_BYTES,
+    RecordType,
+    decode_csv,
+    export_csv,
+    import_preview_digest,
+    prepare_import,
+)
 from app.services.intelligence import _inventory_risks, _serialize_insight, analyze_merchant
 from app.services.sarvam import synthesize_speech, transcribe_audio
 
 router = APIRouter(prefix="/api")
 _assistant_requests: dict[str, deque[float]] = defaultdict(deque)
+MAX_REPORT_DAYS = 366
+MAX_EXPORT_ROWS = 10_000
 
 
 def authorized_merchant(
@@ -178,6 +191,40 @@ def rate_limit_assistant(merchant_id: str) -> None:
     if len(window) >= limit:
         raise HTTPException(status_code=429, detail="Assistant request limit reached. Try again shortly.")
     window.append(now)
+
+
+def validate_report_range(start_date: date, end_date: date) -> None:
+    if start_date > end_date:
+        raise HTTPException(status_code=422, detail="Start date must be on or before end date.")
+    if (end_date - start_date).days + 1 > MAX_REPORT_DAYS:
+        raise HTTPException(status_code=422, detail=f"Date ranges may not exceed {MAX_REPORT_DAYS} days.")
+    if end_date > business_today():
+        raise HTTPException(status_code=422, detail="End date cannot be in the future.")
+
+
+def import_preview_payload(result: dict, digest: str) -> dict:
+    return {
+        "record_type": result["record_type"],
+        "file_digest": digest,
+        "preview_digest": import_preview_digest(digest, result["record_type"], result["mapping"]),
+        "headers": result["headers"],
+        "mapping": result["mapping"],
+        "available_fields": list(result["mapping"].keys()),
+        "supported_fields": list(FIELDS[result["record_type"]]),
+        "required_fields_missing": result["missing_required_fields"],
+        "valid_count": result["valid_count"],
+        "skipped_count": result["skipped_count"],
+        "invalid_count": result["invalid_count"],
+        "preview_records": [
+            {"row": item["row"], "record": item["display"]}
+            for item in result["rows"] if item["status"] == "valid"
+        ][:20],
+        "row_issues": [
+            {"row": item["row"], "status": item["status"], "errors": item["errors"]}
+            for item in result["rows"] if item["status"] != "valid"
+        ],
+        "preview_limit": 20,
+    }
 
 
 def save_assistant_recommendation(db: Session, merchant_id: str, recommendation: Recommendation) -> None:
@@ -760,6 +807,264 @@ def inventory_history(merchant_id: str, product_id: str, db: Session = Depends(g
     return [{"id": item.id, "quantity": item.quantity, "note": item.note, "recorded_at": item.recorded_at} for item in records]
 
 
+@router.get("/merchants/{merchant_id}/analytics")
+def analytics(
+    merchant_id: str,
+    start_date: date,
+    end_date: date,
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    get_merchant(db, merchant_id)
+    validate_report_range(start_date, end_date)
+    return merchant_analytics(db, merchant_id, start_date, end_date)
+
+
+@router.get("/merchants/{merchant_id}/imports/templates/{record_type}")
+def csv_template(
+    merchant_id: str,
+    record_type: RecordType,
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    get_merchant(db, merchant_id)
+    headers = {
+        "sales": "date,amount,quantity,product_name,unit_price,cost_of_goods,note\r\n",
+        "expenses": "date,amount,category,note\r\n",
+        "products": "name,category,quantity,cost,price,supplier_lead_time_days\r\n",
+    }[record_type]
+    return PlainTextResponse(
+        headers,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{record_type}-template.csv"'},
+    )
+
+
+@router.post("/merchants/{merchant_id}/imports/preview")
+async def preview_csv_import(
+    merchant_id: str,
+    record_type: RecordType = Form(),
+    file: UploadFile = File(...),
+    mapping_json: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    get_merchant(db, merchant_id)
+    raw = await file.read(MAX_CSV_BYTES + 1)
+    text, digest = decode_csv(raw, file.filename, file.content_type)
+    preview = prepare_import(db, merchant_id, record_type, text, mapping_json)
+    return import_preview_payload(preview, digest)
+
+
+@router.post("/merchants/{merchant_id}/imports/confirm")
+async def confirm_csv_import(
+    merchant_id: str,
+    record_type: RecordType = Form(),
+    file: UploadFile = File(...),
+    mapping_json: str = Form(),
+    expected_digest: str = Form(),
+    confirmed: bool = Form(),
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    writable_merchant(db, merchant_id)
+    if not confirmed:
+        raise HTTPException(status_code=422, detail="Confirm the preview before importing records.")
+    raw = await file.read(MAX_CSV_BYTES + 1)
+    text, digest = decode_csv(raw, file.filename, file.content_type)
+    preview = prepare_import(db, merchant_id, record_type, text, mapping_json)
+    if not hmac.compare_digest(
+        import_preview_digest(digest, record_type, preview["mapping"]),
+        expected_digest,
+    ):
+        raise HTTPException(status_code=409, detail="The file or column mapping changed after preview. Preview it again before importing.")
+    if preview["missing_required_fields"]:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Map required CSV columns before importing: {', '.join(preview['missing_required_fields'])}.",
+        )
+
+    imported = 0
+    skipped = 0
+    failed_rows = []
+    skipped_rows = []
+    product_names = {
+        product.name.strip().casefold(): product.id
+        for product in db.scalars(select(Product).where(Product.merchant_id == merchant_id))
+    }
+    for item in preview["rows"]:
+        if item["status"] != "valid":
+            if item["status"] == "skipped":
+                skipped += 1
+                skipped_rows.append({"row": item["row"], "reasons": item["errors"]})
+            else:
+                failed_rows.append({"row": item["row"], "errors": item["errors"]})
+            continue
+        record = item["record"]
+        try:
+            with db.begin_nested():
+                if record_type == "sales":
+                    db.add(Sale(
+                        id=str(uuid4()),
+                        merchant_id=merchant_id,
+                        product_id=record["product_id"],
+                        amount=record["amount"],
+                        date=record["date"],
+                        quantity=record["quantity"],
+                        unit_price=record["unit_price"],
+                        cost_of_goods=record["cost_of_goods"],
+                        note=record["note"],
+                        source="import",
+                        import_fingerprint=item["fingerprint"],
+                    ))
+                elif record_type == "expenses":
+                    db.add(Expense(
+                        id=str(uuid4()),
+                        merchant_id=merchant_id,
+                        amount=record["amount"],
+                        date=record["date"],
+                        category=record["category"],
+                        note=record["note"],
+                        source="import",
+                        import_fingerprint=item["fingerprint"],
+                    ))
+                else:
+                    name_key = record["name"].strip().casefold()
+                    if name_key in product_names:
+                        skipped += 1
+                        skipped_rows.append({
+                            "row": item["row"],
+                            "reasons": ["Product already exists; existing products are not overwritten by imports."],
+                        })
+                        continue
+                    product_id = str(uuid4())
+                    db.add(Product(
+                        id=product_id,
+                        merchant_id=merchant_id,
+                        **record,
+                    ))
+                    if record["quantity"] is not None:
+                        db.add(InventoryRecord(
+                            merchant_id=merchant_id,
+                            product_id=product_id,
+                            quantity=record["quantity"],
+                            note="Initial stock count imported from CSV",
+                        ))
+                db.flush()
+            imported += 1
+            if record_type == "products":
+                product_names[record["name"].strip().casefold()] = "imported"
+        except IntegrityError:
+            skipped += 1
+            skipped_rows.append({
+                "row": item["row"],
+                "reasons": ["A matching imported record already exists; the duplicate was skipped."],
+            })
+    db.commit()
+    return {
+        "imported_count": imported,
+        "skipped_count": skipped,
+        "skipped_rows": skipped_rows,
+        "failed_count": len(failed_rows),
+        "failed_rows": failed_rows,
+        "inventory_note": (
+            "Imported historical sales do not change current stock counts."
+            if record_type == "sales" else None
+        ),
+    }
+
+
+@router.get("/merchants/{merchant_id}/exports/{record_type}")
+def export_merchant_csv(
+    merchant_id: str,
+    record_type: RecordType,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    db: Session = Depends(get_db),
+    _: str = Depends(authorized_merchant),
+):
+    get_merchant(db, merchant_id)
+    if record_type in {"sales", "expenses"}:
+        if start_date is None or end_date is None:
+            raise HTTPException(status_code=422, detail="Sales and expense exports require a start and end date.")
+        validate_report_range(start_date, end_date)
+        if record_type == "sales":
+            entries = list(db.scalars(
+                select(Sale)
+                .where(
+                    Sale.merchant_id == merchant_id,
+                    Sale.date >= start_date,
+                    Sale.date <= end_date,
+                )
+                .order_by(Sale.date)
+                .limit(MAX_EXPORT_ROWS + 1)
+            ))
+            if len(entries) > MAX_EXPORT_ROWS:
+                raise HTTPException(status_code=413, detail=f"Export is limited to {MAX_EXPORT_ROWS} rows; narrow the date range.")
+            product_ids = {entry.product_id for entry in entries if entry.product_id}
+            products = {
+                product.id: product.name
+                for product in db.scalars(select(Product).where(
+                    Product.merchant_id == merchant_id,
+                    Product.id.in_(product_ids),
+                ))
+            } if product_ids else {}
+            records = [{
+                "date": entry.date,
+                "amount": entry.amount,
+                "quantity": entry.quantity,
+                "product_name": products.get(entry.product_id, ""),
+                "unit_price": entry.unit_price,
+                "cost_of_goods": entry.cost_of_goods,
+                "note": entry.note,
+                "source": entry.source,
+            } for entry in entries]
+        else:
+            entries = list(db.scalars(
+                select(Expense)
+                .where(
+                    Expense.merchant_id == merchant_id,
+                    Expense.date >= start_date,
+                    Expense.date <= end_date,
+                )
+                .order_by(Expense.date)
+                .limit(MAX_EXPORT_ROWS + 1)
+            ))
+            if len(entries) > MAX_EXPORT_ROWS:
+                raise HTTPException(status_code=413, detail=f"Export is limited to {MAX_EXPORT_ROWS} rows; narrow the date range.")
+            records = [{
+                "date": entry.date,
+                "amount": entry.amount,
+                "category": entry.category,
+                "note": entry.note,
+                "source": entry.source,
+            } for entry in entries]
+    else:
+        entries = list(db.scalars(
+            select(Product)
+            .where(Product.merchant_id == merchant_id)
+            .order_by(Product.name)
+            .limit(MAX_EXPORT_ROWS + 1)
+        ))
+        if len(entries) > MAX_EXPORT_ROWS:
+            raise HTTPException(status_code=413, detail=f"Export is limited to {MAX_EXPORT_ROWS} products.")
+        records = [{
+            "name": entry.name,
+            "category": entry.category,
+            "quantity": entry.quantity,
+            "cost": entry.cost,
+            "price": entry.price,
+            "supplier_lead_time_days": entry.supplier_lead_time_days,
+        } for entry in entries]
+    output = export_csv(record_type, records)
+    filename = record_type if start_date is None else f"{record_type}-{start_date.isoformat()}-to-{end_date.isoformat()}"
+    return PlainTextResponse(
+        output,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
+    )
+
+
 @router.get("/merchants/{merchant_id}/summary", response_model=SummaryOut)
 def summary(
     merchant_id: str,
@@ -770,17 +1075,15 @@ def summary(
     get_merchant(db, merchant_id)
     sales = list(db.scalars(select(Sale).where(Sale.merchant_id == merchant_id, Sale.date == on)))
     expenses = list(db.scalars(select(Expense).where(Expense.merchant_id == merchant_id, Expense.date == on)))
-    revenue = sum((sale.amount for sale in sales), start=0)
-    costs_known = bool(sales) and all(sale.cost_of_goods is not None for sale in sales)
-    cogs = sum((sale.cost_of_goods for sale in sales if sale.cost_of_goods is not None), start=0)
+    metrics = recorded_metrics(sales, expenses)
     return SummaryOut(
-        revenue=revenue,
-        recorded_expenses=sum((expense.amount for expense in expenses), start=0),
-        gross_profit=revenue - cogs if costs_known else None,
-        gross_profit_available=costs_known,
+        revenue=metrics["revenue"],
+        recorded_expenses=metrics["recorded_expenses"],
+        gross_profit=metrics["gross_profit"],
+        gross_profit_available=metrics["gross_profit_available"],
         sales_count=len(sales),
         expenses_count=len(expenses),
-        missing_information=[] if costs_known else ["Product cost is missing for one or more sales; gross profit is not shown."],
+        missing_information=metrics["missing_information"],
     )
 
 

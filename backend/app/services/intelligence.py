@@ -84,6 +84,9 @@ def analyze_merchant(db: Session, merchant_id: str, on: date | None = None) -> d
     trend_threshold = Decimal(str(get_settings().intelligence_change_threshold))
     products = list(db.scalars(select(Product).where(Product.merchant_id == merchant_id)))
     merchant = db.get(Merchant, merchant_id)
+    if merchant is None:
+        raise ValueError("Merchant not found")
+    currency = merchant.currency
     sales = list(db.scalars(select(Sale).where(Sale.merchant_id == merchant_id, Sale.date <= today)))
     expenses = list(db.scalars(select(Expense).where(Expense.merchant_id == merchant_id, Expense.date <= today)))
     db.query(BusinessInsight).filter(BusinessInsight.merchant_id == merchant_id).update(
@@ -116,7 +119,7 @@ def analyze_merchant(db: Session, merchant_id: str, on: date | None = None) -> d
                     "kind": "sales_trend",
                     "priority": 90 if change < 0 else 60,
                     "headline": f"Recorded sales have {direction} by about {percent}%",
-                    "observed": f"Recorded sales were ₹{current_total:.2f} in the latest 7 days versus ₹{previous_total:.2f} in the 7 days before.",
+                    "observed": f"Recorded sales were {currency} {current_total:.2f} in the latest 7 days versus {currency} {previous_total:.2f} in the 7 days before.",
                     "evidence": [f"{len(current_days)} selling days in the latest period.", f"{len(previous_days)} selling days in the comparison period."],
                     "comparison_period": f"{previous_start.isoformat()} to {previous_end.isoformat()} compared with {current_start.isoformat()} to {today.isoformat()}",
                     "why_it_matters": "A sustained change may be worth checking against stock availability, opening hours, or local events.",
@@ -144,7 +147,7 @@ def analyze_merchant(db: Session, merchant_id: str, on: date | None = None) -> d
                 "kind": "expense_change",
                 "priority": 55,
                 "headline": f"Recorded {category.lower()} spending is higher",
-                "observed": f"{category} expenses totaled ₹{recent_total:.2f} in the latest 7 days, up from ₹{prior_total:.2f}.",
+                "observed": f"{category} expenses totaled {currency} {recent_total:.2f} in the latest 7 days, up from {currency} {prior_total:.2f}.",
                 "evidence": [f"{len(recent)} entries in the latest period.", f"{len(prior)} entries in the comparison period."],
                 "comparison_period": "Latest 7 days compared with the previous 7 days",
                 "why_it_matters": "A change in recorded spending may be worth checking before planning other purchases.",
@@ -194,10 +197,10 @@ def analyze_merchant(db: Session, merchant_id: str, on: date | None = None) -> d
                 "entity_id": product.id,
                 "priority": 75,
                 "headline": f"Check the cost and price for {product.name}",
-                "observed": f"Across {units} recorded units, the current entered unit cost and recent average sale amount suggest about ₹{gross_margin:.2f} gross margin per item ({margin_percent:.1f}%).",
+                "observed": f"Across {units} recorded units, the current entered unit cost and recent average sale amount suggest about {currency} {gross_margin:.2f} gross margin per item ({margin_percent:.1f}%).",
                 "evidence": [
                     f"Sales were recorded on {len({sale.date for sale in recent})} different days in the last 30 days.",
-                    f"Current entered unit cost: ₹{product.cost:.2f}.",
+                    f"Current entered unit cost: {currency} {product.cost:.2f}.",
                     "Average sale amount is based on recorded sale totals divided by recorded quantities.",
                 ],
                 "comparison_period": "Recent 30-day product sales and current entered unit cost",

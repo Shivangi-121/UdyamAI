@@ -152,7 +152,7 @@ The persistent microphone button is available on every application page. When co
 
 Sarvam uses the documented `saaras:v4` model with language auto-detection, which preserves the spoken language and supports Hindi, English, and code-mixed speech. Saaras v4 automatically handles the available transcription formats; if configured to use Saaras v3, the integration requests its `codemix` mode. Chat uses `sarvam-105b`; speech output uses `bulbul:v4-flash` and the configured compatible persona. Response language follows the detected transcript language and the assistant's language instructions. Recognition and pronunciation quality can vary, especially for regional accents, names, and Roman-script Hinglish.
 
-Voice and typed questions call the same merchant-scoped assistant and conversation-history path. The Sarvam model can use validated read-only tools for recorded sales, expenses, stock, saved Business Pulse insights, simulations, campaign draft generation, and existing Autopilot tasks. Simulations and campaign copy are not saved or executed; the assistant cannot create or edit financial records, change stock, publish or send campaigns, spend money, or execute tasks. Those write actions are not available through the assistant. When backend voice service is unavailable or microphone access is denied, type the request or use browser speech recognition where supported. If speech synthesis fails, the written response remains visible.
+Voice and typed questions call the same merchant-scoped assistant and conversation-history path. The Sarvam model can use validated read-only tools for recorded sales, date-bounded analytics, expenses, stock, saved Business Pulse insights, simulations, campaign draft generation, and existing Autopilot tasks. Simulations and campaign copy are not saved or executed; the assistant cannot create or edit financial records, change stock, publish or send campaigns, spend money, or execute tasks. Those write actions are not available through the assistant. When backend voice service is unavailable or microphone access is denied, type the request or use browser speech recognition where supported. If speech synthesis fails, the written response remains visible.
 
 Sarvam calls are made only from the backend. Audio is sent to Sarvam for transcription and response text may be sent for speech generation; review Sarvam's current [API terms and privacy documentation](https://docs.sarvam.ai/api-reference/introduction) before using real merchant data. The configured per-merchant assistant request limit applies to voice and typed assistant requests. Normal automated tests mock provider calls and do not use paid API requests.
 
@@ -169,11 +169,32 @@ This optional smoke test calls TTS, transcribes its generated MP3 with STT, and 
 - Personal records can be stored in browser local storage or in the backend, depending on the selected mode.
 - SQLite is the default local database. PostgreSQL is supported through SQLAlchemy; configure `DATABASE_URL` and ensure the database is available before running migrations.
 - A recorded sales total is not the same as profit. Gross profit is reported only when sale-cost information is available and does not subtract operating expenses.
-- Business Twin results use the assumptions entered by the user; they are scenarios, not forecasts.
+- Analytics use the authenticated merchant's sales, expenses, products, and configured stock. Revenue is the sum of recorded sale amounts; recorded expenses are summed separately; gross profit is revenue less recorded cost of goods sold; net profit is gross profit less recorded expenses and is unavailable when any sale in the selected range has missing cost. The average recorded sale is revenue divided by sale records; it is not an order-level average because the model does not group line items into orders.
+- Analytics date ranges are inclusive, limited to 366 days, and use business-record calendar dates (the app's business day is `Asia/Kolkata`). Period comparisons are shown only when recorded history reaches the full prior period and carry a reminder that bookkeeping completeness cannot be verified. Future end dates are rejected.
+- Data coverage reports whether sales and expenses exist, product cost coverage, configured stock counts, and the earliest/latest recorded transaction dates. These are transparent coverage facts, not a quality score. Refunds and cancelled sales are not modeled as separate transaction types.
+- Business Twin results use the selected product's recorded 30-day sales, units, and historical cost completeness as a clearly labeled reference. Selecting a product fills the editable daily-demand assumption with the nearest whole unit to its recorded average; the deterministic simulation remains a scenario, not a forecast.
 - Business insights are generated from available recorded data and deterministic thresholds. Incomplete records can produce incomplete or unavailable findings.
 - Inventory replenishment estimates require the necessary sales history, a stock count, and supplier lead-time information.
 - Backend business-day calculations and browser demo dates use `Asia/Kolkata`.
 - Campaigns are editable drafts. Action plans are checklists. UdyamAI does not send promotions, place supplier orders, process payments, or contact customers.
+
+## CSV import, export, and analytics
+
+The connected backend workspace exposes **Settings → Import and export business data**. Choose Sales, Expenses, or Products and download the matching CSV template. UTF-8 (including UTF-8 with BOM) CSV files are supported; uploads are limited to 2 MB and 5,000 data rows. Dates must use `YYYY-MM-DD`; monetary values must be non-negative decimal amounts with at most two fractional digits (sales and expenses must be greater than zero). Product imports add new products and do not overwrite an existing product with the same name. A sales `product_name`, when provided, must exactly match one product in the merchant's catalog; imported historical sales do not change the current stock count.
+
+The preview identifies column mappings, valid rows, duplicates, and row-level errors before the merchant confirms. Mappings can be changed before revalidating. Confirmation submits the same CSV and its preview digest; a changed file must be previewed again. Valid rows can import even if other rows are invalid, with imported/skipped/failed counts and row errors reported. Exact repeated imported sale/expense rows are skipped using a merchant-scoped fingerprint; identical legitimate transactions in one file are therefore treated as duplicates. Product imports skip existing names rather than updating catalog or inventory history. Spreadsheet formula-like text is exported as plain text with a leading apostrophe.
+
+Supported template headers:
+
+| Record | Columns |
+| --- | --- |
+| Sales | `date, amount, quantity, product_name, unit_price, cost_of_goods, note` |
+| Expenses | `date, amount, category, note` |
+| Products | `name, category, quantity, cost, price, supplier_lead_time_days` |
+
+Use `cost_of_goods` for the historical total cost of the imported sale when known. UdyamAI does not substitute today's product cost for a historical cost; rows without cost remain usable for revenue analytics, while gross and net profit stay unavailable when costs are incomplete. Import fields do not include payment methods, transaction references, discounts, refunds, or cancelled transactions because those fields are not currently represented by the data model.
+
+The analytics endpoint is `GET /api/merchants/{merchant_id}/analytics?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`. CSV endpoints are `POST /api/merchants/{merchant_id}/imports/preview`, `POST /api/merchants/{merchant_id}/imports/confirm`, `GET /api/merchants/{merchant_id}/imports/templates/{sales|expenses|products}`, and `GET /api/merchants/{merchant_id}/exports/{sales|expenses|products}`. Sales and expense exports require an inclusive date range of at most 366 days; product exports contain the current catalog and stock. Exports are limited to 10,000 rows. All these routes use merchant bearer authorization; imports are disabled for read-only demo merchants, and exports only query the authorized merchant's records. Upload contents are parsed as CSV, never executed as spreadsheet formulas, and request size/row-count limits are enforced.
 
 ## API overview
 
@@ -182,7 +203,8 @@ Business routes are scoped to `/api/merchants/{merchant_id}` and require the mer
 | Capability | Routes |
 | --- | --- |
 | Merchant, products, sales, expenses | `/merchants/{id}`, `/products`, `/sales`, `/expenses` |
-| Summary and inventory | `/summary`, `/products/{product_id}/inventory`, `/inventory-risks` |
+| Summary, analytics, and inventory | `/summary`, `/analytics`, `/products/{product_id}/inventory`, `/inventory-risks` |
+| CSV import and export | `/imports/preview`, `/imports/confirm`, `/imports/templates/{record_type}`, `/exports/{record_type}` |
 | Business intelligence | `/intelligence/analyze`, `/insights`, `/outcomes` |
 | Business Twin | `/scenarios/calculate`, `/scenarios` |
 | Assistant | `/assistant`, `/assistant/voice`, `/assistant/team`, `/recommendations` |
@@ -202,7 +224,7 @@ cd C:\Users\shiva\UdyamAI\backend
 python -m pytest -q
 ```
 
-The test suite covers calculations, API validation, merchant scoping, record persistence, scenario handling, assistant fallback behavior, Sarvam request and response handling, voice upload validation, campaign drafts, task workflows, intelligence evidence, and outcomes. External Sarvam calls are mocked.
+The test suite covers calculations, API validation, merchant scoping, record persistence, analytics and coverage, CSV mapping/import/export and duplicate handling, scenario handling, assistant fallback behavior, Sarvam request and response handling, voice upload validation, campaign drafts, task workflows, intelligence evidence, and outcomes. External Sarvam calls are mocked.
 
 ## Security and deployment notes
 

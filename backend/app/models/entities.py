@@ -94,6 +94,10 @@ class Product(Base):
 
 class Sale(Base):
     __tablename__ = "sales"
+    __table_args__ = (
+        Index("ix_sales_merchant_date", "merchant_id", "date"),
+        UniqueConstraint("merchant_id", "import_fingerprint", name="uq_sales_merchant_import_fingerprint"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"), index=True)
@@ -105,11 +109,16 @@ class Sale(Base):
     cost_of_goods: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     note: Mapped[str] = mapped_column(String(500), default="")
     source: Mapped[str] = mapped_column(String(20), default="user")
+    import_fingerprint: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
 class Expense(Base):
     __tablename__ = "expenses"
+    __table_args__ = (
+        Index("ix_expenses_merchant_date", "merchant_id", "date"),
+        UniqueConstraint("merchant_id", "import_fingerprint", name="uq_expenses_merchant_import_fingerprint"),
+    )
 
     id: Mapped[str] = mapped_column(String(80), primary_key=True)
     merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id", ondelete="CASCADE"), index=True)
@@ -118,6 +127,7 @@ class Expense(Base):
     category: Mapped[str] = mapped_column(String(100), default="Other")
     note: Mapped[str] = mapped_column(String(500), default="")
     source: Mapped[str] = mapped_column(String(20), default="user")
+    import_fingerprint: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
 
 
